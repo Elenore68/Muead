@@ -237,3 +237,20 @@ td { padding: 12px var(--s-3); border-top: 1px solid var(--c-border); vertical-a
 .file-list button { background: none; border: 0; color: var(--c-danger); font-weight: 600; }
 .skeleton td { color: transparent; }
 .pager button:disabled, .btn:disabled { opacity: .55; cursor: not-allowed; }
+
+/* ---------- TASK 04b: members, approvals, dialogs (existing tokens only) ---------- */
+.modal-backdrop { position: fixed; inset: 0; z-index: 50; background: rgba(46, 26, 94, .35); display: grid; place-items: center; padding: var(--s-4); }
+.modal { width: min(520px, 100%); max-height: calc(100vh - 2 * var(--s-4)); overflow-y: auto; background: #fff; }
+.modal .card-title { margin-bottom: var(--s-3); }
+.card-actions { display: flex; flex-wrap: wrap; gap: var(--s-2); margin-top: var(--s-3); }
+.card-actions .btn { padding: 8px var(--s-3); }
+.member-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-2); }
+.member-list li { display: flex; flex-direction: column; gap: 2px; }
+.member-main { display: flex; align-items: center; justify-content: space-between; gap: var(--s-2); }
+.icon-x { background: none; border: 0; color: var(--c-text-muted); padding: 4px; border-radius: var(--r-sm); display: grid; place-items: center; }
+.icon-x:hover { color: var(--c-danger); background: var(--st-rejected-bg); }
+.result-list { list-style: none; margin: 0 0 var(--s-4); padding: 0; display: flex; flex-direction: column; gap: var(--s-1); max-height: 240px; overflow-y: auto; }
+.result { width: 100%; display: flex; align-items: center; gap: var(--s-3); padding: 8px var(--s-3); background: #fff; border: 1px solid var(--c-border); border-radius: var(--r-sm); text-align: start; }
+.result.selected { border-color: var(--c-primary); box-shadow: 0 0 0 2px rgba(142, 79, 208, .2); }
+.result .pill { margin-inline-start: auto; }
+.history { display: flex; flex-direction: column; gap: var(--s-4); }

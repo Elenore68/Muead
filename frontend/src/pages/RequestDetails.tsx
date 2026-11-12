@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Calendar, Check, Download, FileText, Flag, Layers, Link2, MoreVertical, Paperclip, X } from "lucide-react";
 import { Topbar } from "../components/Layout";
@@ -9,21 +9,39 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
+import { useApprovalHistory, useMembers } from "../data/useActivity";
+import { canDecide, myCurrentRecord } from "../data/permissions";
+import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
+import ApprovalHistory from "../components/ApprovalHistory";
+import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
 
 export default function RequestDetails() {
   const { id = "" } = useParams();
-  // key: a different id gets fresh state (details, tabs, attachments).
+  // key: a different id gets fresh state (details, tabs, attachments, members, approvals).
   return <RequestDetailsView key={id} id={id} />;
 }
+
+type Flash = { kind: "success" | "error"; text: string } | null;
 
 function RequestDetailsView({ id }: { id: string }) {
   const nav = useNavigate();
   const [tab, setTab] = useState("Details");
-  const { state, retry } = useRequestDetails(id);
+  const { state, retry, refresh } = useRequestDetails(id);
   // Loaded the first time the Attachments tab is opened; kept while switching tabs.
   const attachments = useAttachments(id, tab === "Attachments");
+  // Live mode only (disabled, no request, in mock mode).
+  const members = useMembers(id);
+  const history = useApprovalHistory(id);
+  const { profile } = useAuth();
+  const [flash, setFlash] = useState<Flash>(null);
+
+  const refreshAll = useCallback(() => {
+    void refresh();
+    members.refresh();
+    history.refresh();
+  }, [refresh, members.refresh, history.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -58,6 +76,7 @@ function RequestDetailsView({ id }: { id: string }) {
   }
 
   const r = state.data;
+  const live = r.live;
   const rows = [
     { icon: FileText, label: "Title", value: r.title },
     { icon: FileText, label: "Description", value: r.description },
@@ -79,6 +98,27 @@ function RequestDetailsView({ id }: { id: string }) {
       : []),
   ];
 
+  // Live-mode activity context: everything is scoped to THIS request (viewer block + members), never global roles.
+  const historyData = history.state.kind === "ready" ? history.state.data : null;
+  const ctx: ActivityContext | null = live
+    ? {
+        requestId: live.id,
+        status: live.status,
+        version: live.version,
+        policy: live.approvalPolicy,
+        viewer: live.viewer,
+        callerId: profile?.id,
+        members: members.state,
+        retryMembers: members.retry,
+        onChanged: refreshAll,
+        notify: (kind, text) => setFlash({ kind, text }),
+      }
+    : null;
+  const decisionAllowed = live
+    ? canDecide({ status: live.status, viewer: live.viewer, history: historyData, userId: profile?.id, orgRoles: profile?.roles })
+    : false;
+  const myRecord = live ? myCurrentRecord(historyData, profile?.id) : undefined;
+
   return (
     <>
       <Topbar crumbs={`Requests > ${r.displayId}`} title="" />
@@ -87,9 +127,17 @@ function RequestDetailsView({ id }: { id: string }) {
         <h1>{r.displayId} – {r.title}</h1>
         <div className="sp"><StatusPill status={r.status} /><button className="btn-icon" aria-label="More"><MoreVertical size={18} /></button></div>
       </div>
+      {flash && (
+        <div role={flash.kind === "error" ? "alert" : "status"} className={`notice ${flash.kind}`}>
+          <span>{flash.text}</span>
+          <button className="btn btn-outline" onClick={() => setFlash(null)}>Dismiss</button>
+        </div>
+      )}
       <Tabs items={TABS} active={tab} onChange={setTab} />
       {tab === "Attachments" && config.apiEnabled ? (
         <AttachmentsTab requestId={id} owner={r.owner} {...attachments} />
+      ) : tab === "Approvals" && live ? (
+        <ApprovalHistory state={history.state} onRetry={history.retry} />
       ) : tab !== "Details" ? (
         <div className="card placeholder" style={{ marginTop: 16 }}>
           {config.apiEnabled
@@ -111,12 +159,30 @@ function RequestDetailsView({ id }: { id: string }) {
             <div className="card"><h3>Requested by</h3><Person name={r.owner.name} initials={r.owner.initials} /></div>
             <div className="card"><h3>Status</h3><StatusPill status={r.status} /></div>
             <div className="card"><h3>Created on</h3>{r.createdOn}</div>
-            <div className="side-actions">
-              {/* No approval endpoint exists yet, so the buttons are shown but disabled in API mode. */}
-              <button className="btn btn-approve solid" disabled={config.apiEnabled} aria-describedby={config.apiEnabled ? "approval-note" : undefined}><Check size={16} />Approve</button>
-              <button className="btn btn-reject" disabled={config.apiEnabled} aria-describedby={config.apiEnabled ? "approval-note" : undefined}><X size={16} />Reject</button>
-            </div>
-            {config.apiEnabled && <small id="approval-note" className="cell-sub">Approvals are not available yet.</small>}
+            {ctx && live ? (
+              <>
+                <ApproversCard ctx={ctx} />
+                <ParticipantsCard ctx={ctx} />
+                {/* Only an assigned, eligible approver with a pending decision gets controls. */}
+                <DecisionPanel
+                  requestId={live.id}
+                  requestNo={r.displayId}
+                  canDecide={decisionAllowed}
+                  myRecord={myRecord}
+                  onConflict={refreshAll}
+                  onDecided={(res) => {
+                    setFlash({ kind: "success", text: decisionResultText(r.displayId, res) });
+                    refreshAll();
+                  }}
+                />
+              </>
+            ) : (
+              // Mock mode: original design, unchanged.
+              <div className="side-actions">
+                <button className="btn btn-approve solid"><Check size={16} />Approve</button>
+                <button className="btn btn-reject"><X size={16} />Reject</button>
+              </div>
+            )}
           </div>
         </div>
       )}

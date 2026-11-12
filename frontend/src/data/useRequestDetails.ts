@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { config } from "../config";
 import { ApiClientError, errorMessage } from "../api/client";
-import { getRequest, listAttachments, type Attachment, type RequestDetail } from "../api/requests";
-import { formatDate, priorityLabel, statusLabel } from "../api/labels";
+import { getRequest, listAttachments, type ApiStatus, type Attachment, type RequestDetail } from "../api/requests";
+import { formatDate, formatDateTime, priorityLabel, statusLabel } from "../api/labels";
 import { requests as mockRequests } from "./mock";
 
 /** What the Request Details page renders, independent of the data source. */
@@ -20,6 +20,16 @@ export interface RequestView {
   /** SOW fields that the API may return. Shown only when present. */
   extra: { label: string; value: string }[];
   links: { label: string; url: string }[];
+  /** Live mode only: raw fields needed for membership and approval actions. Absent in mock mode. */
+  live?: {
+    id: string;
+    status: ApiStatus;
+    version: number;
+    approvalPolicy: "ANY_ONE" | "ALL";
+    approvalRound: number;
+    approvalState: string;
+    viewer: RequestDetail["viewer"];
+  };
 }
 
 export type LoadState<T> =
@@ -27,9 +37,6 @@ export type LoadState<T> =
   | { kind: "notFound" }
   | { kind: "error"; message: string }
   | { kind: "ready"; data: T };
-
-const formatDateTime = (iso: string): string =>
-  new Date(iso).toLocaleString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" });
 
 /** Only http(s) links are rendered as anchors (the backend validates too). */
 const safeLinks = (links: RequestDetail["links"]) =>
@@ -62,6 +69,15 @@ const fromApi = (r: RequestDetail): RequestView => {
     createdOn: formatDateTime(r.createdAt),
     extra,
     links: safeLinks(r.links),
+    live: {
+      id: r.id,
+      status: r.status,
+      version: r.version,
+      approvalPolicy: r.approvalPolicy ?? "ANY_ONE",
+      approvalRound: r.approvalRound ?? 0,
+      approvalState: r.approvalState ?? "NONE",
+      viewer: r.viewer,
+    },
   };
 };
 
@@ -86,7 +102,22 @@ function useLiveRequestDetails(id: string) {
     return () => ac.abort();
   }, [id, reloadKey]);
 
-  return { state, retry: useCallback(() => setReloadKey((k) => k + 1), []) };
+  /**
+   * Silent refresh after an action (decision, submit, withdraw, member change): keeps the current view on screen
+   * and replaces it when the fresh copy arrives. Resolves false if the refresh failed (the old view stays).
+   */
+  const refresh = useCallback(async (): Promise<boolean> => {
+    try {
+      const r = await getRequest(id);
+      setState({ kind: "ready", data: fromApi(r) });
+      return true;
+    } catch (e) {
+      if (e instanceof ApiClientError && e.status === 404) setState({ kind: "notFound" });
+      return false;
+    }
+  }, [id]);
+
+  return { state, retry: useCallback(() => setReloadKey((k) => k + 1), []), refresh };
 }
 
 function useMockRequestDetails(id: string) {
@@ -100,7 +131,7 @@ function useMockRequestDetails(id: string) {
         },
       }
     : { kind: "notFound" };
-  return { state, retry: () => {} };
+  return { state, retry: () => {}, refresh: async () => true };
 }
 
 export const useRequestDetails = config.apiEnabled ? useLiveRequestDetails : useMockRequestDetails;

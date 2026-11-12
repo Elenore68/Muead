@@ -105,6 +105,15 @@ export interface RequestDetail extends RequestSummary {
   affectedSystems?: string[];
   links?: { label: string; url: string }[];
   approvalState?: string;
+  /** TASK 04a fields (api-specification.md 12.1). */
+  approvalPolicy?: "ANY_ONE" | "ALL";
+  approvalRound?: number;
+  /** What the caller may do in THIS request. The backend re-checks on every call. */
+  viewer?: {
+    activityRole: "OWNER" | "PARTICIPANT" | "APPROVER" | null;
+    canEdit: boolean;
+    canManageMembers: boolean;
+  };
 }
 
 export const getRequest = (id: string, signal?: AbortSignal) =>
