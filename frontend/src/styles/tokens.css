@@ -1,0 +1,79 @@
+/*
+ * Mue'ad design tokens.
+ * Source: docs/design/design-system.md
+ * ALL color values are APPROXIMATE visual estimates from the UI reference.
+ * Replace with sampled values from the original design files when available.
+ */
+:root {
+  /* Brand (approx.) */
+  --c-primary: #8e4fd0;
+  --c-primary-600: #7b3fc4;
+  --c-deep: #2e1a5e;
+  --c-magenta: #b04fc8;
+  --c-coral: #f0645a;
+  --c-peach: #fda070;
+  --c-pink: #f0679f;
+  --c-amber: #f9a24d;
+
+  --g-brand: linear-gradient(90deg, var(--c-primary) 0%, var(--c-coral) 100%);
+  --g-brand-soft: linear-gradient(90deg, var(--c-primary) 0%, var(--c-peach) 100%);
+
+  /* Text / borders (approx.) */
+  --c-text: #2b2350;
+  --c-text-muted: #6b6585;
+  --c-border: #e6ddf3;
+
+  /* Surfaces (approx.) */
+  --bg-app: linear-gradient(135deg, #f8f2fc 0%, #fbf0f8 100%);
+  --bg-sidebar: linear-gradient(180deg, #f1e4fa 0%, #f9e9f5 100%);
+  --bg-card: rgba(255, 255, 255, 0.82);
+  --bg-header-row: #f6f0fb;
+
+  /* Status (approx.) */
+  --st-pending-bg: #fde9d2;
+  --st-pending-fg: #c26a12;
+  --st-progress-bg: #dcebfe;
+  --st-progress-fg: #2a6bcb;
+  --st-done-bg: #d9f5df;
+  --st-done-fg: #2e8b4a;
+  --st-rejected-bg: #fddde6;
+  --st-rejected-fg: #d6335a;
+
+  /* Priority (approx.) */
+  --pr-high-bg: #fddde6;
+  --pr-high-fg: #d6335a;
+  --pr-medium-bg: #fdebd0;
+  --pr-medium-fg: #c2701a;
+  --pr-low-bg: #dcebfe;
+  --pr-low-fg: #2a6bcb;
+
+  --c-online: #22b04b;
+  --c-success: #1f9d55;
+  --c-danger: #d6335a;
+
+  /* Spacing (4px grid) */
+  --s-1: 4px;
+  --s-2: 8px;
+  --s-3: 12px;
+  --s-4: 16px;
+  --s-5: 24px;
+  --s-6: 32px;
+  --s-8: 48px;
+
+  /* Radius */
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-pill: 999px;
+
+  /* Shadows (approx.) */
+  --sh-card: 0 8px 24px rgba(120, 70, 190, 0.08);
+  --sh-cta: 0 6px 16px rgba(155, 89, 208, 0.3);
+
+  /* Typography */
+  --font-latin: "Plus Jakarta Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --font-arabic: "Tajawal", "Segoe UI", Tahoma, sans-serif;
+
+  --sidebar-w: 232px;
+  --sidebar-w-rail: 76px;
+}

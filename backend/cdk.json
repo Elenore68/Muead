@@ -1,0 +1,7 @@
+{
+  "app": "npx tsx infra/bin/app.ts",
+  "watch": { "include": ["infra/**", "src/**"] },
+  "context": {
+    "@aws-cdk/aws-lambda:recognizeLayerVersion": true
+  }
+}

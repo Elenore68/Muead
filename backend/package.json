@@ -1,0 +1,29 @@
+{
+  "name": "muead-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Mue'ad backend: AWS CDK infrastructure and Lambda handlers (TypeScript)",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy"
+  },
+  "dependencies": {
+    "@aws-sdk/client-dynamodb": "3.1167.0",
+    "@aws-sdk/client-s3": "3.1167.0",
+    "@aws-sdk/lib-dynamodb": "3.1167.0",
+    "@aws-sdk/s3-request-presigner": "3.1167.0",
+    "ulid": "3.0.2"
+  },
+  "devDependencies": {
+    "@types/aws-lambda": "8.10.164",
+    "@types/node": "22.20.5",
+    "aws-cdk": "2.1148.1",
+    "aws-cdk-lib": "2.276.0",
+    "constructs": "10.8.1",
+    "esbuild": "0.28.2",
+    "tsx": "4.23.15",
+    "typescript": "5.9.3"
+  }
+}
