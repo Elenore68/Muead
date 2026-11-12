@@ -82,7 +82,7 @@ The frontend must be extended later (it is not modified in this task). The API i
 ### 2.1 Stated in the SOW [SOW]
 | Area | Requirement | SOW ref |
 |---|---|---|
-| Auth and roles | Web app for authorized users; role-based access; access to activities according to role. Roles: Maintenance Owner, Technical Participants, Approvers, Platform Administrator. Cognito for sign-in and user groups. | 2, 4.1, 5.2 |
+| Auth and roles | Web app for authorized users; role-based access; access to activities according to role. Roles: Maintenance Owner, Technical Participants, Approvers, Platform Administrator. Cognito for sign-in and user groups. *(04a interpretation: SOW §2 says participants vary "depending on the type and scope of each maintenance activity", so owner / participant / approver are per-activity roles; Platform Administrator is the only platform role, plus the `ApprovalEligible` eligibility group.)* | 2, 4.1, 5.2 |
 | Maintenance requests | Create and manage requests; capture environment, cloud platform, affected systems, maintenance type, scope, schedule; attach documents and links; track status. | 4.2 |
 | Participants / invitations | Owner invites team members; notifications with activity details, responsibilities and scheduled time; invitees confirm participation. | 4.3 |
 | Tasks | Assign tasks to teams or individuals; track owner, deadline, completion status. | 4.3 |
@@ -117,9 +117,17 @@ These need an answer before implementation. I did not assume them.
 
 1. Details of SOW 4.7 (execution tracking) and 4.10 (final report and closure): which fields, states, who closes.
 2. Maintenance request lifecycle: exact statuses and transitions, and whether rescheduling is allowed after approval.
-3. Approval model: one approver or several? Sequential or parallel? Who is the approver (chosen by owner, or by rule)? Can the owner be their own approver?
+3. ~~Approval model.~~ **Decided in TASK 04a.**
+   - The owner (or an admin) assigns 1–20 `ApprovalEligible` approvers per request.
+   - Policy is `ANY_ONE` (default) or `ALL`, decided in parallel.
+     - `ANY_ONE`: one approval approves; the request is rejected only when every approver has rejected.
+     - `ALL`: everyone must approve, and any rejection rejects.
+   - Reject needs a comment.
+   - Owners and participants of a request can never approve it, and platform admins get no bypass.
+   - Approval groups are modelled for later.
+   - See `api-specification.md` §12.
 4. How users are created: self sign-up, admin-created, invitation only? Can external (non-platform) people be invited by email?
-5. Can a user have several roles? Does the Technical Participant have sub-types (Cloud, Database, Application, OS, Security / Network) that must be stored?
+5. ~~Can a user have several roles?~~ **Decided in TASK 04a.** Yes, across activities: one activity role per request, which can differ between requests. Participant sub-types are stored as the member's `specialty` (Cloud, Database, Application, OS, SecurityNetwork).
 6. Is the platform single-tenant (one organization) or multi-tenant (several customers in one deployment)? This changes keys and Cognito design. The SOW says customers exist but the platform has one account.
 7. Allowed attachment types and sizes. The UI says PDF, DOC, XLS, PNG, max 10 MB; the SOW is silent. Are links first-class items?
 8. Category / maintenance type / environment / cloud platform value lists (for example AWS, Azure, GCP? Production, Staging?).
@@ -143,14 +151,14 @@ The SOW's service list is the baseline. For each service in the task brief, with
 
 | Service | Purpose here | Notes |
 |---|---|---|
-| **Amazon Cognito** [SOW] | User pool for sign-in. Groups map to roles: `MaintenanceOwner`, `TechnicalParticipant`, `Approver`, `PlatformAdmin`. Issues JWTs (ID/access tokens) the frontend sends to the API. | User creation model is [OPEN]. MFA is [REC]. |
+| **Amazon Cognito** [SOW] | User pool for sign-in. Issues JWTs (ID/access tokens) the frontend sends to the API. *(Revised in TASK 04a.)* Groups are **organization-level only**: `PlatformAdmin` (administration, read all) and `ApprovalEligible` (may be assigned as approver). Activity roles (owner / participant / approver) are **per request in DynamoDB**, not Cognito groups. The former `MaintenanceOwner`, `TechnicalParticipant` and `Approver` groups were removed before the first deployment. | Users are created by an administrator (no self sign-up). In-app user management is not built; use the Cognito console/CLI. MFA is [REC]. |
 | **Amazon API Gateway** [SOW] | Single REST API (`/v1/...`). Cognito authorizer validates JWT before Lambda runs. Throttling, CORS, request validation, access logs. | REST API vs HTTP API is a choice [OPEN]; REST API is assumed in the spec because it has request validation and usage plans. |
 | **AWS Lambda** [SOW] | Business logic: request CRUD, invitations, tasks, approvals, checklist, execution updates, validation, notifications, reports, dashboard reads. Authorization checks (role plus membership) happen here. | Language/runtime [OPEN]. |
 | **Amazon DynamoDB** [SOW] | System of record. Single-table design recommended (see `database-design.md`). On-demand capacity [REC]. PITR [REC]. Encrypted with KMS. | Streams [REC] to feed counters and notifications. |
 | **Amazon S3** [SOW] | Attachments and generated reports. Private bucket, KMS-encrypted, pre-signed URLs, versioning [REC]. | Object keys are scoped by request ID. |
 | **Amazon SNS** [SOW] | Pub/sub for events such as `request.submitted`, `approval.decided`, `task.assigned`. Downstream subscribers (including email workers or webhooks later). | "Push notifications" appears in the SOW diagram. |
 | **Amazon SES** [SOW] | Email: invitations, reminders, approval notices, activity updates. | Sender identity and sandbox exit [OPEN]. |
-| **AWS Step Functions** [SOW] | Approval workflow (wait for decision using a task token, timeouts, reminders) and activity progression. | Standard workflows. |
+| **AWS Step Functions** [SOW] | Approval workflow (wait for decision using a task token, timeouts, reminders) and activity progression. | Standard workflows. **Deferred:** TASK 04a implements submit/decide as single DynamoDB transactions; a workflow can later wrap the same operations for reminders and timeouts. |
 | **Amazon EventBridge** [SOW] | Scheduler for reminders (for example 24 h before window) and routing application events. | |
 | **Amazon Bedrock** [SOW] | AI Activity Summary generation. Model choice [OPEN]. | Called from a Lambda; output saved as DRAFT until reviewed. |
 | **AWS KMS / IAM / CloudWatch** [SOW] | Encryption keys, least-privilege roles per Lambda, logs/metrics/alarms. | |

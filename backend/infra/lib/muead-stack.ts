@@ -15,8 +15,14 @@ export interface MueadStackProps extends cdk.StackProps {
   cfg: EnvConfig;
 }
 
-/** Cognito groups = platform roles (SOW section 2 and 5.2). */
-const ROLE_GROUPS = ["MaintenanceOwner", "TechnicalParticipant", "Approver", "PlatformAdmin"];
+/**
+ * Organization-level Cognito groups only.
+ *  - PlatformAdmin:    platform administration (unchanged).
+ *  - ApprovalEligible: may be ASSIGNED as an approver; grants no approval authority by itself.
+ * Activity roles (owner / participant / approver) are per request in DynamoDB, not Cognito groups.
+ * The former MaintenanceOwner / TechnicalParticipant / Approver groups were removed before any deployment.
+ */
+const ORG_GROUPS = ["PlatformAdmin", "ApprovalEligible"];
 
 interface RouteDef {
   method: string;
@@ -93,7 +99,7 @@ export class MueadStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-    for (const g of ROLE_GROUPS) {
+    for (const g of ORG_GROUPS) {
       new cognito.CfnUserPoolGroup(this, `Group${g}`, { userPoolId: userPool.userPoolId, groupName: g });
     }
     const userPoolClient = userPool.addClient("WebClient", {
@@ -136,12 +142,18 @@ export class MueadStack extends cdk.Stack {
     const fnAttachments = mkFn("Attachments", "attachments.ts");
     const fnDashboard = mkFn("Dashboard", "dashboard.ts");
     const fnReference = mkFn("Reference", "reference.ts");
+    const fnUsers = mkFn("Users", "users.ts");
+    const fnMembers = mkFn("Members", "members.ts");
+    const fnApprovals = mkFn("Approvals", "approvals.ts");
 
     // Least privilege per function.
     table.grantReadWriteData(fnMe);
     table.grantReadWriteData(fnRequests);
     table.grantReadWriteData(fnAttachments);
     table.grantReadData(fnDashboard);
+    table.grantReadData(fnUsers);
+    table.grantReadWriteData(fnMembers);
+    table.grantReadWriteData(fnApprovals);
     bucket.grantReadWrite(fnAttachments); // includes KMS use via the bucket key policy grant
     key.grantEncryptDecrypt(fnAttachments);
 
@@ -230,6 +242,20 @@ export class MueadStack extends cdk.Stack {
       { method: "GET", path: "dashboard/upcoming" },
     ]);
     wire(fnReference, [{ method: "GET", path: "reference-data" }]);
+    wire(fnUsers, [{ method: "GET", path: "users" }]);
+    wire(fnMembers, [
+      { method: "GET", path: "requests/{requestId}/members" },
+      { method: "POST", path: "requests/{requestId}/members" },
+      { method: "DELETE", path: "requests/{requestId}/members/{userId}" },
+    ]);
+    wire(fnApprovals, [
+      { method: "POST", path: "requests/{requestId}/submit" },
+      { method: "POST", path: "requests/{requestId}/withdraw" },
+      { method: "POST", path: "requests/{requestId}/approvals/decision" },
+      { method: "GET", path: "requests/{requestId}/approvals" },
+      { method: "GET", path: "approvals" },
+      { method: "GET", path: "approvals/summary" },
+    ]);
 
     // ---------- Outputs (needed by the frontend configuration) ----------
     new cdk.CfnOutput(this, "ApiUrl", { value: api.url });

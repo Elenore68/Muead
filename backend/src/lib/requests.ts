@@ -1,7 +1,6 @@
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, TABLE, type Item } from "./db";
-import { badRequest, forbidden, notFound } from "./errors";
-import type { Caller } from "./auth";
+import { badRequest, notFound } from "./errors";
 
 export const STATUSES = [
   "DRAFT",
@@ -45,15 +44,20 @@ export const indexAttrs = (r: Item): Item => {
   return attrs;
 };
 
-const INDEX_KEYS = ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK", "GSI3PK", "GSI3SK", "entityType"];
+/** Storage-only attributes never returned by the API. `membersRev` is an internal concurrency counter. */
+const INTERNAL_KEYS = ["PK", "SK", "GSI1PK", "GSI1SK", "GSI2PK", "GSI2SK", "GSI3PK", "GSI3SK", "entityType", "membersRev"];
+
+export const APPROVAL_POLICIES = ["ANY_ONE", "ALL"] as const;
 
 /** Public representation (no storage keys). */
 export const toApi = (r: Item): Item => {
   const out: Item = {};
-  for (const [k, v] of Object.entries(r)) if (!INDEX_KEYS.includes(k)) out[k] = v;
+  for (const [k, v] of Object.entries(r)) if (!INTERNAL_KEYS.includes(k)) out[k] = v;
   const { ownerId, ownerName, ownerInitials, scheduleStart, scheduleEnd, timezone, ...rest } = out;
   return {
     ...rest,
+    approvalPolicy: r.approvalPolicy ?? "ANY_ONE",
+    approvalRound: r.approvalRound ?? 0,
     owner: { id: ownerId, displayName: ownerName, initials: ownerInitials },
     schedule: scheduleStart ? { start: scheduleStart, end: scheduleEnd ?? null, timezone: timezone ?? null } : null,
   };
@@ -108,6 +112,7 @@ export interface RequestFields {
   scheduleStart?: string;
   scheduleEnd?: string;
   timezone?: string;
+  approvalPolicy?: string;
 }
 
 /**
@@ -132,6 +137,13 @@ export const parseFields = (body: Record<string, unknown>, mode: "create" | "pat
     const p = str(body.priority, "priority", 10);
     if (p !== undefined && !(PRIORITIES as readonly string[]).includes(p)) throw badRequest("priority must be HIGH, MEDIUM or LOW", [{ field: "priority", issue: "enum" }]);
     set("priority", p);
+  }
+  if ("approvalPolicy" in body && body.approvalPolicy !== undefined) {
+    const p = body.approvalPolicy;
+    if (typeof p !== "string" || !(APPROVAL_POLICIES as readonly string[]).includes(p)) {
+      throw badRequest("approvalPolicy must be ANY_ONE or ALL", [{ field: "approvalPolicy", issue: "enum" }]);
+    }
+    set("approvalPolicy", p);
   }
   if ("affectedSystems" in body && body.affectedSystems !== undefined) {
     const a = body.affectedSystems;
@@ -171,25 +183,33 @@ export const parseFields = (body: Record<string, unknown>, mode: "create" | "pat
 };
 
 /* ---------- Access ---------- */
-export const loadRequest = async (id: string): Promise<Item> => {
+/**
+ * `consistent: true` = strongly consistent read. Required wherever the result feeds a state transition whose
+ * condition does not cover every item read (submit, decide, withdraw); see the TASK 04a review, finding C2.
+ */
+export const loadRequest = async (id: string, opts: { consistent?: boolean } = {}): Promise<Item> => {
   if (!/^[0-9A-HJKMNP-TV-Z]{26}$/.test(id)) throw notFound("Request not found");
-  const res = await ddb.send(new GetCommand({ TableName: TABLE, Key: reqKey(id) }));
+  const res = await ddb.send(new GetCommand({ TableName: TABLE, Key: reqKey(id), ConsistentRead: opts.consistent === true }));
   if (!res.Item || res.Item.archived) throw notFound("Request not found");
   return res.Item;
 };
 
-/**
- * Visibility today: owner or platform admin.
- * Participants and assigned approvers are added when those features are built (steps 3-4).
- * 404 is returned instead of 403 to avoid revealing that a request exists.
- */
-export const canView = (r: Item, c: Caller): boolean => c.isAdmin || r.ownerId === c.userId;
-export const canEdit = (r: Item, c: Caller): boolean => c.isAdmin || r.ownerId === c.userId;
+/** Attachments are part of the reviewed plan: frozen while approval is running and once the request is finished. */
+export const ATTACHMENTS_LOCKED: Status[] = ["PENDING_APPROVAL", "COMPLETED", "CANCELLED"];
 
-export const assertView = (r: Item, c: Caller): void => {
-  if (!canView(r, c)) throw notFound("Request not found");
+/** Transaction item that fails unless the request exists and its status allows attachment changes. */
+export const attachmentsUnlockedCheck = (requestId: string) => {
+  const values: Record<string, string> = {};
+  ATTACHMENTS_LOCKED.forEach((s, i) => (values[`:l${i}`] = s));
+  return {
+    ConditionCheck: {
+      TableName: TABLE,
+      Key: reqKey(requestId),
+      ConditionExpression: `attribute_exists(PK) AND NOT (#s IN (${ATTACHMENTS_LOCKED.map((_, i) => `:l${i}`).join(", ")}))`,
+      ExpressionAttributeNames: { "#s": "status" },
+      ExpressionAttributeValues: values,
+    },
+  };
 };
-export const assertEdit = (r: Item, c: Caller): void => {
-  assertView(r, c);
-  if (!canEdit(r, c)) throw forbidden();
-};
+
+// Visibility and edit rights are activity-scoped now: see assertView / assertEdit in lib/members.ts.

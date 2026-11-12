@@ -5,11 +5,12 @@ import { IN_PROGRESS_STATUSES, monthOf, toSummary } from "../lib/requests";
 import { countsFromItems, dailySeries, globalCounts, ownerRequests } from "../lib/stats";
 import type { Caller } from "../lib/auth";
 
-/** scope=mine (default) = requests I own. scope=all = everything; platform admins and approvers only. */
+/** scope=mine (default) = requests I own. scope=all = everything; platform admins only. */
 const resolveScope = (c: Caller, raw: string | undefined): "mine" | "all" => {
   if (raw === undefined || raw === "mine") return "mine";
   if (raw !== "all") throw badRequest("scope must be mine or all", [{ field: "scope", issue: "enum" }]);
-  if (!c.isAdmin && !c.roles.includes("Approver")) throw forbidden("scope=all requires the Approver or PlatformAdmin role");
+  // Global data is a platform-administration view. Approval authority is per request, so no group grants it.
+  if (!c.isAdmin) throw forbidden("scope=all requires the PlatformAdmin role");
   return "all";
 };
 

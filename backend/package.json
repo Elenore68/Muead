@@ -5,6 +5,7 @@
   "description": "Mue'ad backend: AWS CDK infrastructure and Lambda handlers (TypeScript)",
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "node --import tsx --test \"test/**/*.test.ts\"",
     "synth": "cdk synth",
     "diff": "cdk diff",
     "deploy": "cdk deploy"

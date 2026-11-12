@@ -1,11 +1,27 @@
 import { DeleteObjectCommand, GetObjectCommand, HeadObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
-import { DeleteCommand, GetCommand, PutCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
+import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ulid } from "ulid";
-import { ddb, queryAll, TABLE, type Item } from "../lib/db";
+import { ddb, queryAll, TABLE, transact, txConditionFailed, type Item } from "../lib/db";
 import { ApiError, badRequest, conflict, forbidden, notFound } from "../lib/errors";
 import { json, router, type Ctx } from "../lib/http";
-import { assertEdit, assertView, loadRequest } from "../lib/requests";
+import { assertEdit, assertView } from "../lib/members";
+import { ATTACHMENTS_LOCKED, attachmentsUnlockedCheck, loadRequest, type Status } from "../lib/requests";
+
+/**
+ * Attachments are part of the plan under review: no changes while PENDING_APPROVAL, COMPLETED or CANCELLED
+ * (TASK 04a review, finding I5). Checked up front for a clear error, and again inside each write transaction.
+ */
+const LOCKED_MESSAGE = "Attachments cannot change while the request is waiting for approval or after it is finished";
+const assertAttachmentsUnlocked = (r: Item) => {
+  if (ATTACHMENTS_LOCKED.includes(r.status as Status)) throw new ApiError(409, "ATTACHMENTS_LOCKED", LOCKED_MESSAGE);
+};
+/** Index 1 of every attachment write transaction is the request-status check. */
+const lockedOrConflict = (e: unknown, itemConflict: () => never): never => {
+  if (txConditionFailed(e, 1)) throw new ApiError(409, "ATTACHMENTS_LOCKED", LOCKED_MESSAGE);
+  if (txConditionFailed(e, 0)) itemConflict();
+  throw e;
+};
 
 const s3 = new S3Client({});
 const BUCKET = process.env.BUCKET_NAME ?? "";
@@ -50,7 +66,8 @@ const loadAttachment = async (requestId: string, attachmentId: string): Promise<
 /** POST /requests/{id}/attachments: register the file and return a short-lived pre-signed PUT URL. */
 const createUpload = async ({ caller, path, body }: Ctx) => {
   const r = await loadRequest(path.requestId);
-  assertEdit(r, caller);
+  await assertEdit(r, caller);
+  assertAttachmentsUnlocked(r);
 
   const fileName = typeof body.fileName === "string" ? sanitizeName(body.fileName.trim()) : "";
   const contentType = typeof body.contentType === "string" ? body.contentType.trim().toLowerCase() : "";
@@ -78,7 +95,10 @@ const createUpload = async ({ caller, path, body }: Ctx) => {
     uploadedAt: now,
     status: "PENDING_UPLOAD",
   };
-  await ddb.send(new PutCommand({ TableName: TABLE, Item: item }));
+  await transact([
+    { Put: { TableName: TABLE, Item: item, ConditionExpression: "attribute_not_exists(PK)" } },
+    attachmentsUnlockedCheck(r.id),
+  ]).catch((e) => lockedOrConflict(e, () => { throw conflict("CONCURRENT_UPDATE", "Please try again"); }));
   const uploadUrl = await getSignedUrl(s3, new PutObjectCommand({ Bucket: BUCKET, Key: s3Key, ContentType: contentType, ContentLength: sizeBytes }), {
     expiresIn: UPLOAD_URL_TTL,
   });
@@ -94,10 +114,11 @@ const createUpload = async ({ caller, path, body }: Ctx) => {
 /** POST .../confirm: verify the object really arrived in S3 and matches the declared size. */
 const confirmUpload = async ({ caller, path }: Ctx) => {
   const r = await loadRequest(path.requestId);
-  assertEdit(r, caller);
+  await assertEdit(r, caller);
   const a = await loadAttachment(r.id, path.attachmentId);
   if (a.uploadedBy !== caller.userId && !caller.isAdmin) throw forbidden();
   if (a.status === "AVAILABLE") return json(200, toApi(a));
+  assertAttachmentsUnlocked(r);
 
   const head = await s3.send(new HeadObjectCommand({ Bucket: BUCKET, Key: a.s3Key })).catch((e) => {
     if (e?.name === "NotFound" || e?.$metadata?.httpStatusCode === 404) throw conflict("UPLOAD_MISSING", "The file has not been uploaded yet");
@@ -105,22 +126,26 @@ const confirmUpload = async ({ caller, path }: Ctx) => {
   });
   if (head.ContentLength !== a.sizeBytes) throw conflict("UPLOAD_MISMATCH", "The uploaded file size does not match the declared size");
 
-  const res = await ddb.send(
-    new UpdateCommand({
-      TableName: TABLE,
-      Key: attKey(r.id, a.id),
-      UpdateExpression: "SET #s = :ok, confirmedAt = :now",
-      ExpressionAttributeNames: { "#s": "status" },
-      ExpressionAttributeValues: { ":ok": "AVAILABLE", ":now": new Date().toISOString() },
-      ReturnValues: "ALL_NEW",
-    }),
-  );
-  return json(200, toApi(res.Attributes as Item));
+  const confirmedAt = new Date().toISOString();
+  await transact([
+    {
+      Update: {
+        TableName: TABLE,
+        Key: attKey(r.id, a.id),
+        UpdateExpression: "SET #s = :ok, confirmedAt = :now",
+        ConditionExpression: "attribute_exists(PK)",
+        ExpressionAttributeNames: { "#s": "status" },
+        ExpressionAttributeValues: { ":ok": "AVAILABLE", ":now": confirmedAt },
+      },
+    },
+    attachmentsUnlockedCheck(r.id),
+  ]).catch((e) => lockedOrConflict(e, () => { throw notFound("Attachment not found"); }));
+  return json(200, toApi({ ...a, status: "AVAILABLE", confirmedAt }));
 };
 
 const listAttachments = async ({ caller, path }: Ctx) => {
   const r = await loadRequest(path.requestId);
-  assertView(r, caller);
+  await assertView(r, caller);
   const items = await queryAll({
     KeyConditionExpression: "PK = :p AND begins_with(SK, :a)",
     ExpressionAttributeValues: { ":p": `REQ#${r.id}`, ":a": "ATT#" },
@@ -130,7 +155,7 @@ const listAttachments = async ({ caller, path }: Ctx) => {
 
 const downloadUrl = async ({ caller, path }: Ctx) => {
   const r = await loadRequest(path.requestId);
-  assertView(r, caller);
+  await assertView(r, caller);
   const a = await loadAttachment(r.id, path.attachmentId);
   if (a.status !== "AVAILABLE") throw notFound("Attachment not found");
   const url = await getSignedUrl(
@@ -148,10 +173,14 @@ const downloadUrl = async ({ caller, path }: Ctx) => {
 
 const deleteAttachment = async ({ caller, path }: Ctx) => {
   const r = await loadRequest(path.requestId);
-  assertView(r, caller);
+  await assertView(r, caller);
   const a = await loadAttachment(r.id, path.attachmentId);
   if (!caller.isAdmin && r.ownerId !== caller.userId && a.uploadedBy !== caller.userId) throw forbidden();
-  await ddb.send(new DeleteCommand({ TableName: TABLE, Key: attKey(r.id, a.id) }));
+  assertAttachmentsUnlocked(r);
+  await transact([
+    { Delete: { TableName: TABLE, Key: attKey(r.id, a.id), ConditionExpression: "attribute_exists(PK)" } },
+    attachmentsUnlockedCheck(r.id),
+  ]).catch((e) => lockedOrConflict(e, () => { throw notFound("Attachment not found"); }));
   await s3.send(new DeleteObjectCommand({ Bucket: BUCKET, Key: a.s3Key })); // versioned bucket: leaves a delete marker
   return json(204);
 };

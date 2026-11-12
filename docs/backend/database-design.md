@@ -34,14 +34,14 @@ SOW 5.4 says DynamoDB stores "maintenance requests, user information, assignment
 | Attribute | Notes |
 |---|---|
 | `email`, `displayName`, `initials` | Frontend shows name + initials avatar [FE] |
-| `roles` | Set of `MaintenanceOwner`, `TechnicalParticipant`, `Approver`, `PlatformAdmin` (mirrors Cognito groups; Cognito is the authority) |
+| `roles` | *(Revised in TASK 04a.)* Organization-level groups only: `PlatformAdmin`, `ApprovalEligible`. Not stored as a set on the profile; mirrored as `ROLE#<group>` items (see section 8). They never grant authority inside an activity; activity roles live in 3.4. |
 | `teamSpecialties` | Set: `Cloud`, `Database`, `Application`, `OS`, `SecurityNetwork` [SOW 2]; need confirmation [OPEN] |
 | `status` | `ACTIVE`, `DISABLED`, `INVITED` |
 | `notificationPrefs` | Map, e.g. `{ email: true }` [REC] |
 | `createdAt`, `lastLoginAt` | |
 
 GSI1: `GSI1PK=EMAIL#<email lowercase>`, `GSI1SK=USER` (lookup when inviting by email).
-GSI2: `GSI2PK=ROLE#<role>`, `GSI2SK=<displayName>#<userId>` (list approvers / owners / participants for pickers).
+GSI2 (directory, 04a): the profile has `GSI2PK=DIRECTORY`, `GSI2SK=<lowercase displayName>#<userId>` (name prefix search). Org-group mirror items `USER#<id> / ROLE#<group>` have `GSI2PK=ROLE#<group>` and the same `GSI2SK` (for example, list `ApprovalEligible` users), plus a name/email snapshot.
 The "online" dots in the team list [FE] are not stored. [OPEN 17]
 
 ### 3.2 Maintenance Request [SOW 4.2]
@@ -62,7 +62,12 @@ The "online" dots in the team list [FE] are not stored. [OPEN 17]
 | `ownerId` | Maintenance Owner |
 | `links` | List of `{label, url}` [SOW: links] |
 | `conflictFlags` | List of conflicting `requestId`s (computed) [SOW 4.4] |
-| `approvalState` | `NONE`, `PENDING`, `APPROVED`, `REJECTED` (denormalized from approvals) |
+| `approvalState` | `NONE`, `PENDING`, `APPROVED`, `REJECTED`, `WITHDRAWN` (denormalized from approvals) |
+| `withdrawnAt`, `withdrawnBy`, `withdrawReason` | Set by withdraw; cleared on the next submit |
+| `approvalPolicy` | *(04a)* `ANY_ONE` (default) or `ALL` |
+| `approvalRound` | *(04a)* Current round number; `0` = never submitted |
+| `submittedAt`, `submittedBy`, `approvalDecidedAt` | *(04a)* Last submission / final decision |
+| `membersRev` | *(04a, internal)* Incremented by every member change. Submit requires it unchanged, so the approver snapshot is exact |
 | `executionToken` | Step Functions execution ARN / task token reference [REC] |
 | `createdAt`, `updatedAt`, `closedAt`, `version` | |
 
@@ -75,24 +80,54 @@ GSIs:
 `PK=REQ#<id>`  `SK=ATT#<attachmentId>`
 `fileName`, `contentType`, `sizeBytes`, `s3Key`, `uploadedBy`, `uploadedAt`, `status` (`PENDING_UPLOAD`, `AVAILABLE`). Links are on the request item (above). Limits [OPEN 7].
 
-### 3.4 Participant / Invitation [SOW 4.3]
-`PK=REQ#<id>`  `SK=PART#<userId>`
-`role` / `specialty` (what they do in this activity), `responsibilities` (text), `invitedBy`, `invitedAt`, `inviteStatus` (`INVITED`, `CONFIRMED`, `DECLINED`), `respondedAt`, `declineReason`.
-GSI1 (my activities): `GSI1PK=USER#<userId>`, `GSI1SK=PART#<scheduleStart>#<requestId>` (stores a copy of `title`, `scheduleStart`, `status` for list screens; refreshed via stream).
-Invited persons without an account: [OPEN 4].
+### 3.4 Activity member: owner, participant, approver [SOW 2, 4.3, 4.5] (revised and implemented in TASK 04a)
+`PK=REQ#<id>`  `SK=MEMBER#<userId>`. This replaces the earlier `PART#<userId>` design.
+
+| Attribute | Notes |
+|---|---|
+| `activityRole` | `OWNER`, `PARTICIPANT` or `APPROVER`, **in this request only** |
+| `status` | `ACTIVE` or `REMOVED` (soft remove; the item is never deleted) |
+| `displayName`, `initials` | Snapshot at assignment |
+| `specialty`, `responsibilities` | Participants (specialty from SOW teams) |
+| `assignedBy`, `assignedByName`, `assignedByRole`, `assignedAt` | Who assigned, with their activity role (`OWNER` / `PLATFORM_ADMIN`) |
+| `removedBy`, `removedByName`, `removedByRole`, `removedAt` | Set on removal |
+| `inviteStatus`, `respondedAt`, `declineReason` | Participant confirmation (design only, not built) |
+
+- **One role per person per request.** Because the key is (request, user), a person cannot be approver **and** owner or participant of the same request. That makes self-approval structurally impossible; the decision endpoint checks it again.
+- **Different roles in different requests.** `REQ#A/MEMBER#sara=APPROVER`, `REQ#B/MEMBER#sara=PARTICIPANT` and `REQ#C/MEMBER#sara=OWNER` are independent items.
+- **GSI1 (my activities):** `GSI1PK=MEMBER#<userId>`, `GSI1SK=<request createdAt>#<requestId>` (newest first). Removal deletes the GSI1 attributes, so removed memberships drop out of "my activities" while the item stays for history. The list resolves request data with a batched `GetItem`, so there is no denormalized copy that could go stale.
+- **Caps:** 20 approvers and 50 members per request.
+- Invited persons without an account: [OPEN 4].
 
 ### 3.5 Task [SOW 4.3]
 `PK=REQ#<id>`  `SK=TASK#<taskId>`
 `title`, `description`, `assigneeType` (`USER` or `TEAM`), `assigneeId` (userId or team name), `dueAt`, `status` (`TODO`, `IN_PROGRESS`, `DONE`, `BLOCKED`), `order`, `createdBy`, `completedAt`, `version`.
 GSI3 (my tasks): `GSI3PK=ASSIGNEE#<assigneeId>`, `GSI3SK=<status>#<dueAt>#<taskId>`.
 
-### 3.6 Approval [SOW 4.5]
-Two kinds of items:
-- **Approval request / assignment**: `PK=REQ#<id>`  `SK=APPR#<round>#<approverId>` – `approverId`, `decision` (`PENDING`, `APPROVED`, `REJECTED`), `comment`, `decidedAt`, `taskToken` (Step Functions, stored encrypted or kept in the workflow only).
-- **History** is the set of these items across rounds, plus audit entries. Each resubmission creates a new `round`.
-GSI3 (approver inbox): `GSI3PK=APPROVER#<approverId>`, `GSI3SK=<decision>#<requestedAt>#<requestId>`. Denormalized columns for the Approvals table [FE]: `requestNo`, `title`, `description`, `requestedBy`, `category`, `priority`, `requestedAt`.
-Rejection requires a non-empty `comment` [SOW: reviewers can add comments; making it mandatory on reject is a recommendation, [OPEN 3]].
-Approval counts for the Approvals KPI cards (pending / approved / rejected) [FE] come from counters (3.12).
+### 3.6 Approval [SOW 4.5] (revised and implemented in TASK 04a)
+Authority comes from the request's `APPROVER` members (3.4), never from a global group. Approvers must also be in the `ApprovalEligible` Cognito group. Eligibility only allows assignment.
+
+The approval items are:
+
+- **Round header:** `PK=REQ#<id>`  `SK=APPRROUND#<round, 4 digits>`
+  - `policy` (`ANY_ONE` / `ALL`), `status` (`OPEN`, `APPROVED`, `REJECTED`, `WITHDRAWN`), `withdrawReason`;
+  - `approverIds`, `approverCount`;
+  - `submittedAt`, `submittedBy`, `submittedByName`, `submittedByRole`;
+  - `decidedAt`, `decidedBy`.
+- **Decision record** (one per assigned approver per round): `PK=REQ#<id>`  `SK=APPR#<round>#<approverId>`
+  - `approverName`, `approverInitials` (snapshot), `activityRole` (`APPROVER`);
+  - `decision` (`PENDING`, `APPROVED`, `REJECTED`, `NOT_REQUIRED`);
+  - `comment` (required on reject), `decidedAt`, `decidedBy`, `decidedByName`;
+  - `closedReason` (`APPROVED_BY_OTHER` / `REJECTED_BY_OTHER` / `WITHDRAWN`) and `closedBy` for records closed as `NOT_REQUIRED`;
+  - a snapshot of the request fields shown in the inbox: `requestNo`, `title`, `description` (300 chars), `category`, `priority`, `requestedBy` (owner), `submittedAt`.
+- **GSI3 (personal inbox):** `GSI3PK=APPROVER#<approverId>`, `GSI3SK=<decision>#<submittedAt>#<requestId>`. A decision rewrites `GSI3SK`, so each tab is a `begins_with` query. KPI counts use `Select=COUNT` on the same index; there are no stored approval counters to drift.
+- **History:** all rounds stay forever. A resubmission after rejection creates round `n + 1`. Step Functions `taskToken` is not used (deferred).
+
+**Future approval groups** (data model only, not implemented):
+- `PK=AGROUP#<groupId>  SK=META` holds `name`, `description`, `createdBy`, `createdAt`.
+- `PK=AGROUP#<groupId>  SK=MEMBER#<userId>` holds the group membership, with a name snapshot and `addedBy` / `addedAt`.
+- A request would reference groups as `approverGroupIds`. Submit would **expand** each group into individual `APPROVER` members and decision records, tagging each record with `viaGroupId`. Audit and authority therefore always name actual people, and later group edits never change an open round.
+- Eligibility and the self-approval rules apply per expanded person.
 
 ### 3.7 Readiness checklist [SOW 4.6]
 `PK=REQ#<id>`  `SK=CHK#<itemId>`
@@ -153,18 +188,21 @@ All child items share the request's partition (`PK=REQ#<id>`), so one `Query PK=
 |---|---|---|---|
 | 1 | Get user profile by id | all | `GetItem USER#id / PROFILE` |
 | 2 | Find user by email | invite | GSI1 `EMAIL#…` |
-| 3 | List users by role (pickers) | invite, assign | GSI2 `ROLE#…` |
+| 3 | Directory search / eligible approvers (pickers) | assign | GSI2 `DIRECTORY` or `ROLE#ApprovalEligible`, `begins_with <name prefix>` *(04a)* |
 | 4 | Create request, allocate `requestNo` | New Request | Counter + `PutItem` |
 | 5 | Get request detail | Details | `GetItem REQ#id / META` |
 | 6 | Get everything for a request | Details tabs | `Query PK=REQ#id` (filter by SK prefix) |
 | 7 | List my requests (owner) | Requests | GSI1 `OWNER#id` |
-| 8 | List activities I participate in | Requests, dashboard | GSI1 `USER#id`, `begins_with PART#` |
+| 8 | List requests I am a member of (any or one activity role) | Requests | GSI1 `MEMBER#id` (filter `status=ACTIVE`, optional `activityRole`), then batch `GetItem` of the requests *(04a)* |
+| 8a | My activity role in a request (authorization) | every request call | `GetItem REQ#id / MEMBER#me` *(04a)* |
+| 8b | Members of a request | Details | `Query REQ#id`, `begins_with MEMBER#` *(04a)* |
 | 9 | List requests by status, ordered by schedule | Requests tabs, dashboard | GSI2 `STATUS#s` |
 | 10 | Text search by title / id | Requests search | Not natively supported. Start with filtering inside a status/owner query; use OpenSearch only if needed [OPEN]. |
 | 11 | Upcoming activities (next N days) | Dashboard, Schedule | GSI3 `SCHED#yyyy-mm` range |
 | 12 | Scheduling conflicts for a window | Create/edit, dashboard | GSI3 range over months, then overlap check (and shared `affectedSystems`) in Lambda |
-| 13 | Pending approvals for an approver | Approvals | GSI3 `APPROVER#id`, `begins_with PENDING#` |
-| 14 | Approval history of a request | Details > Approvals | `Query REQ#id`, `begins_with APPR#` |
+| 13 | My approvals by decision (+ counts) | Approvals | GSI3 `APPROVER#me`, `begins_with <DECISION>#`; counts with `Select=COUNT` *(04a)* |
+| 14 | Approval history of a request | Details > Approvals | `Query REQ#id`, `begins_with APPR` (round headers `APPRROUND#` + records `APPR#`) *(04a)* |
+| 14a | Records of the current round (decision) | decide | `Query REQ#id`, `begins_with APPR#<round>#` *(04a)* |
 | 15 | My tasks | Dashboard | GSI3 `ASSIGNEE#id` |
 | 16 | Tasks of a request | Details | `Query REQ#id`, `begins_with TASK#` |
 | 17 | Checklist for a request | Details | `begins_with CHK#` |
@@ -198,10 +236,17 @@ Dashboard totals in the UI ("12 total") should come from real aggregates, not th
 Differences between this design and the code written so far. The design above stays the target.
 
 - **Table name** is `muead-<env>-main` (for example `muead-dev-main`). Three GSIs (`GSI1`, `GSI2`, `GSI3`), all projecting all attributes. KMS customer-managed key, PITR on, on-demand billing, retained on stack deletion.
-- **User roles**: a user can hold several roles, but a single item can carry only one `GSI2PK`. So roles are mirrored as one item per role: `PK=USER#<id>`, `SK=ROLE#<role>`, `GSI2PK=ROLE#<role>`, `GSI2SK=<displayName>#<id>`. They are synced from the Cognito groups on `GET /me`. The `roles` set on the profile item described in 3.1 is not stored.
+- **Org-level groups** *(revised 04a)*: only `PlatformAdmin` and `ApprovalEligible`. They are mirrored as one item per group: `PK=USER#<id>`, `SK=ROLE#<group>`, `GSI2PK=ROLE#<group>`, `GSI2SK=<lowercase displayName>#<id>`, with a name/email snapshot. They are synced from the token on `GET /me`; stale mirrors (including any `ROLE#MaintenanceOwner` / `TechnicalParticipant` / `Approver`) are deleted on the next sign-in. Consequence: a group change made in Cognito shows up in directory searches only after that user signs in again. Decisions use the live token claim instead.
 - **Statistics** are written in the same transaction as the request write (not by a stream Lambda). Items: `STATS#GLOBAL / STATUS#<status>`, `STATS#GLOBAL / CATEGORY#<name>`, `STATS#MONTH#<yyyy-mm> / DAY#<yyyy-mm-dd>`. The category count under `STATS#GLOBAL` was added to support "Requests by Category".
 - **GSI3 (schedule)** only holds non-draft requests and indexes an activity under its **start month** only. Activities spanning months are not duplicated yet, so "upcoming" can miss an activity that started in an earlier month and is still running.
 - **GSI2 sort** is `<scheduleStart or createdAt>#<id>`, so the admin "all requests" list is ordered by schedule within each status, not by creation date. The owner list (GSI1) is newest first.
 - **Audit** items (`AUDIT#<timestamp>#<id>`) store the action and the names of changed fields, not full before/after values.
 - **Attachments**: `s3Key` is `attachments/<requestId>/<attachmentId>/<fileName>`, and `status` moves from `PENDING_UPLOAD` to `AVAILABLE` only after the object is verified in S3.
-- **Not built yet**: participants, tasks, approvals, checklist, execution updates, validation, notifications, reports, and the request status transitions (so `statsOnStatusChange` exists but is unused).
+- **Activity membership and approvals (04a)**: implemented as in 3.4 and 3.6. Creating a request also writes the creator's `OWNER` member item in the same transaction.
+  - **Status counters:** submit and final decisions update them through `statsOnStatusChange`.
+  - **Transaction limits:** submit and decision transactions are at most 25 items (request + round + ≤20 records + audit + 2 counters). A guard refuses anything above DynamoDB's limit of 100 before sending.
+  - **Indexes:** no new GSI was needed; the new key prefixes reuse GSI1, GSI2 and GSI3. They were checked against every index write and query: no two entity types share a partition-key prefix.
+  - **Consistency** *(review fix)*: submit, decide and withdraw use strongly consistent reads (request, membership, members, round records). Lists and inbox reads stay eventually consistent; index reads always are.
+  - **Expression names** *(review fix)*: several stored attribute names are DynamoDB reserved words (`comment`, `status`, `count`, `timezone`). Every update, condition or filter expression must alias them through `ExpressionAttributeNames`. The test suite lints all expressions that the handlers send.
+  - **Directory privacy** *(review fix)*: profiles and group mirror items still store `email` (needed for exact lookup), but no endpoint returns another user's email.
+- **Not built yet**: tasks, checklist, execution updates, validation, notifications, reports, approval groups, participant invitation responses, and post-approval status transitions.

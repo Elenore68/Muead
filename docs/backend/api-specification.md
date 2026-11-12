@@ -16,24 +16,26 @@ Labels: **[SOW]** stated in the SOW, **[FE]** needed by the existing frontend, *
 
 ### 1.2 Authentication [SOW: Cognito]
 - Header `Authorization: Bearer <Cognito JWT>`. Cognito authorizer on API Gateway validates it.
-- Roles come from the `cognito:groups` claim: `MaintenanceOwner`, `TechnicalParticipant`, `Approver`, `PlatformAdmin` [SOW §2].
-- Whether a user may hold several roles: [OPEN 5]. The API assumes yes (groups are a list) and grants the union.
+- **Organization-level groups** come from the `cognito:groups` claim. Only two exist: `PlatformAdmin` (administration and read access to all requests) and `ApprovalEligible` (may be **assigned** as an approver). Neither grants authority inside a maintenance activity. *(Decided in TASK 04a; replaces the earlier global groups `MaintenanceOwner`, `TechnicalParticipant`, `Approver`, which are removed.)*
+- **Activity roles** (`OWNER`, `PARTICIPANT`, `APPROVER`) are per request and stored in DynamoDB, not in the token. A person can hold different activity roles in different requests (SOW §2 stakeholders are activity-dependent). See §1.3 and §12.
 - Sign-in, sign-out, token refresh and password flows are done directly against Cognito (via the chosen client library [OPEN 18]); there are no `/login` endpoints in this API.
 
-### 1.3 Authorization model [REC]
-Two checks on every call: (1) **role** from the token, (2) **activity membership** for activity-scoped data.
+### 1.3 Authorization model (activity-scoped, decided in TASK 04a)
+Authority inside a maintenance request comes **only** from the caller's ACTIVE membership in **that** request (`REQ#<id> / MEMBER#<userId>`, see `database-design.md` 3.4). Organization-level groups never grant activity authority.
 
-Role abbreviations in the tables below:
+Codes in the tables below (all are **per request**):
 
 | Code | Meaning |
 |---|---|
-| **O** | Maintenance Owner. For activity-scoped endpoints, only the owner of **that** request. |
-| **P** | Technical Participant who is a **member of that request** (any invite status unless stated). |
-| **A** | Approver. For activity-scoped endpoints, an approver **assigned to that request**. |
-| **ADM** | Platform Administrator. Full access to all activities and administration. |
+| **O** | The `OWNER` member of **that** request (the person who created it). Any active user can create a request and become its owner. |
+| **P** | A `PARTICIPANT` member of **that** request. |
+| **A** | An `APPROVER` member of **that** request, assigned by the owner or an admin. Must also be in `ApprovalEligible`. |
+| **ADM** | A `PlatformAdmin`: read access to all requests and member management on any request. **No approval bypass** (see §12.3). |
 | **Any** | Any authenticated user (still limited to what they may see). |
 
-Visibility (default, [REC] pending [OPEN 2, 3, 5]): a user sees a request if they are its owner, a participant, an assigned approver, or an admin. Admins see everything.
+- One person has at most **one** activity role per request, so the owner or a participant of a request can never be its approver.
+- The same person may be `APPROVER` in request A, `PARTICIPANT` in request B and `OWNER` in request C.
+- Visibility: a user sees a request if they are an ACTIVE member (any activity role) or a platform admin. Others get `404`.
 
 ### 1.4 Common headers
 | Header | Use |
@@ -141,7 +143,7 @@ Legend: **Req** = request body or parameters. **Res** = successful response. Rol
 |---|---|---|---|---|---|
 | GET | `/me` | Current user profile and effective roles; replaces hard-coded "Amal". [FE] | – | `200 { id, email, displayName, initials, roles[], teamSpecialties[], notificationPrefs, unreadNotifications }` | Any |
 | PATCH | `/me` | Update own display name, preferences. [REC] | `{ displayName?, notificationPrefs?: { email: bool } }` | `200` profile | Any |
-| GET | `/users` | Search users for pickers (invite, assign, approvers). Also feeds the Team list. [FE][SOW 4.3] | Query: `role?`, `specialty?`, `q?`, `limit`, `nextToken` | `200 { items:[{id, displayName, initials, email, roles[], teamSpecialties[], status}], nextToken }` | O, A, ADM (P: limited to members of their activities) |
+| GET | `/users` | Directory search for assignment pickers. **Implemented in TASK 04a** (see §12.1). No email addresses in results. [SOW 4.3] | Query: `q` (**required, ≥ 2 chars**; name prefix, or exact email if it contains `@`), `approverEligible?=true`, `limit`, `nextToken` | `200 { items:[{id, displayName, initials, approvalEligible}], nextToken }` | Any |
 | POST | `/users` | Create or invite a platform user. [SOW 4.1 "authorized users"; mechanism OPEN 4] | `{ email, displayName, roles[], teamSpecialties[]? }` | `201 { id, status: "INVITED" }` | ADM |
 | PATCH | `/users/{userId}` | Change roles, specialties, enable/disable. [SOW §2 Platform Administrator] | `{ roles?, teamSpecialties?, status? }` | `200` user | ADM |
 
@@ -159,11 +161,12 @@ Legend: **Req** = request body or parameters. **Res** = successful response. Rol
 |---|---|---|---|---|---|
 | GET | `/requests` | List requests. Powers Requests page tabs, search, pagination. [FE] | Query: `status?` (one or comma list), `mine=owner\|participant\|approver`, `ownerId?`, `q?` (title or request no), `category?`, `priority?`, `from?`, `to?` (schedule start), `sort`, `limit`, `nextToken` | `200 { items:[RequestSummary], nextToken, totalCount? }` | Any (visibility rules §1.3) |
 | GET | `/requests/counts` | Per-status counts for tab labels ("All (12)", "Pending (4)"). [FE] | Query: `mine?` | `200 { all, byStatus:{PENDING_APPROVAL, IN_PROGRESS, COMPLETED, REJECTED, ...} }` | Any |
-| POST | `/requests` | Create a request as `DRAFT`. [FE New Request][SOW 4.2] | `{ title*, description*, environment, cloudPlatform, affectedSystems[], maintenanceType, scope, schedule:{start,end,timezone}, category?, priority?, links?[] }` (*required on the current form; others per SOW, mandatory level [OPEN 8]) | `201 Request` (+ `Location`) | O, ADM |
+| POST | `/requests` | Create a request as `DRAFT`; the caller becomes its `OWNER` member. [FE New Request][SOW 4.2] | `{ title*, description*, environment, cloudPlatform, affectedSystems[], maintenanceType, scope, schedule:{start,end,timezone}, category?, priority?, links?[], approvalPolicy? }` (*required on the current form; others per SOW, mandatory level [OPEN 8]; `approvalPolicy` `ANY_ONE` (default) or `ALL`) | `201 Request` (+ `Location`) | Any |
 | GET | `/requests/{requestId}` | Request detail. [FE] | – | `200 Request` | O, P, A, ADM |
 | PATCH | `/requests/{requestId}` | Edit fields. Allowed in `DRAFT` and `REJECTED`; after approval only by [OPEN 2]. | any subset of create fields + `version` | `200 Request` | O, ADM |
-| POST | `/requests/{requestId}/submit` | Submit for approval: validates required fields, runs conflict check, starts the Step Functions approval workflow, notifies approvers. [SOW 4.5, 5.6] | `{ approverIds[], version }` (approver choice vs rule: [OPEN 3]) | `202 { status:"PENDING_APPROVAL", approvalRound, conflicts[] }` | O, ADM |
+| POST | `/requests/{requestId}/submit` | Submit for approval. Snapshots the request's `APPROVER` members into a new approval round. **Implemented in TASK 04a without Step Functions, notifications or conflict check** (see §12.2). [SOW 4.5, 5.6] | `{ version }` (approvers come from the request's members, not from the body) | `200 { requestId, status:"PENDING_APPROVAL", approvalRound, approvalPolicy, approvers, version }` | O, ADM |
 | POST | `/requests/{requestId}/transition` | Move through the post-approval lifecycle. Validates the target state and its preconditions (for example `READINESS` -> `IN_PROGRESS` only if required checklist items are `READY`; precondition rules [OPEN 2]). | `{ to: "SCHEDULED"\|"READINESS"\|"IN_PROGRESS"\|"VALIDATION"\|"COMPLETED", note?, version }` | `200 Request` | O, ADM (VALIDATION->COMPLETED: see closure §3.12) |
+| POST | `/requests/{requestId}/withdraw` | Pull a `PENDING_APPROVAL` request back to `DRAFT` (recovery when a round cannot finish). **Implemented** (see §12.2). | `{ reason, version }` (reason required, max 1000) | `200 { requestId, status:"DRAFT", approvalState:"WITHDRAWN", round, closedRecords, version }` | O, ADM |
 | POST | `/requests/{requestId}/cancel` | Cancel before `IN_PROGRESS`; cancels the workflow. [REC] | `{ reason, version }` | `200 Request` | O, ADM |
 | POST | `/requests/{requestId}/archive` | Soft-archive. [REC] No hard delete. | `{ version }` | `200` | ADM |
 | GET | `/requests/{requestId}/activity` | Combined timeline (audit + execution updates) for the Activity tab. [FE tab not built] | `limit`, `nextToken` | `200 { items:[{type, actor, message, at, meta}], nextToken }` | O, P, A, ADM |
@@ -187,16 +190,19 @@ Files go directly to S3 using pre-signed URLs; they never pass through API Gatew
 | GET | `/requests/{requestId}/attachments/{attachmentId}/download-url` | Short-lived pre-signed GET URL. | – | `200 { url, expiresInSeconds }` | O, P, A, ADM |
 | DELETE | `/requests/{requestId}/attachments/{attachmentId}` | Remove an attachment (uploader, owner, or admin). | – | `204` | O, ADM, uploader |
 
-### 3.6 Participants and invitations [SOW 4.3]
+### 3.6 Members: participants and approvers [SOW 4.3, 4.5]
+*Revised in TASK 04a: participants and approvers are both activity members (`/members` replaces `/participants`).*
 
 | Method | Path | Purpose | Req | Res | Role |
 |---|---|---|---|---|---|
-| GET | `/requests/{requestId}/participants` | List participants with invite status. | – | `200 { items:[{userId, displayName, initials, specialty, responsibilities, inviteStatus, respondedAt}] }` | O, P, A, ADM |
-| POST | `/requests/{requestId}/participants` | Invite team members. Sends in-app notification and email with activity details, responsibilities, scheduled time. [SOW 4.3, 5.5] | `{ invitations:[{ userId, specialty?, responsibilities }] }` (invite by email for non-users: [OPEN 4]) | `201 { items:[participant] }` | O, ADM |
-| PATCH | `/requests/{requestId}/participants/{userId}` | Edit responsibilities. | `{ specialty?, responsibilities? }` | `200` | O, ADM |
-| DELETE | `/requests/{requestId}/participants/{userId}` | Remove a participant (tasks must be reassigned first, else `409`). | – | `204` | O, ADM |
-| POST | `/requests/{requestId}/participants/{userId}/resend` | Re-send invitation / reminder. | – | `202` | O, ADM |
-| POST | `/requests/{requestId}/participants/me/response` | Invited member confirms or declines. [SOW "confirm their participation"] | `{ response:"CONFIRMED"\|"DECLINED", reason? }` | `200 participant` | P (self) |
+| GET | `/requests/{requestId}/members` | Members with their activity role. **Implemented.** | Query: `includeRemoved?=true` | `200 { items:[Member], limits:{maxApprovers, maxMembers} }` | O, P, A, ADM |
+| POST | `/requests/{requestId}/members` | Assign a participant or an approver. **Implemented** (rules §12.1). | `{ userId, activityRole:"PARTICIPANT"\|"APPROVER", specialty?, responsibilities? }` | `201 Member` | O, ADM |
+| DELETE | `/requests/{requestId}/members/{userId}` | Soft-remove a member (the owner cannot be removed). **Implemented.** | – | `204` | O, ADM |
+| PATCH | `/requests/{requestId}/members/{userId}` | Edit specialty and responsibilities. Design only. | `{ specialty?, responsibilities? }` | `200 Member` | O, ADM |
+| POST | `/requests/{requestId}/members/{userId}/resend` | Re-send invitation / reminder. Design only (needs notifications). | – | `202` | O, ADM |
+| POST | `/requests/{requestId}/members/me/response` | Invited participant confirms or declines. Design only. [SOW "confirm their participation"] | `{ response:"CONFIRMED"\|"DECLINED", reason? }` | `200 Member` | P (self) |
+
+`Member`: `{ userId, displayName, initials, activityRole, status:"ACTIVE"|"REMOVED", specialty, responsibilities, assignedBy:{id, displayName, activityRole}, assignedAt, removedBy, removedAt }`. Names are snapshots taken at assignment.
 
 ### 3.7 Tasks [SOW 4.3]
 
@@ -214,13 +220,21 @@ Files go directly to S3 using pre-signed URLs; they never pass through API Gatew
 
 | Method | Path | Purpose | Req | Res | Role |
 |---|---|---|---|---|---|
-| GET | `/approvals` | Approver inbox for the Approvals page: tabs Pending/Approved/Rejected, search. [FE] | Query: `decision=PENDING\|APPROVED\|REJECTED`, `q?`, `sort`, `limit`, `nextToken` | `200 { items:[{ approvalId, requestId, requestNo, title, description, requestedBy:{...}, category, priority, requestedAt, decision, decidedAt }], nextToken }` | A, ADM |
-| GET | `/approvals/summary` | KPI cards (Pending / Approved / Rejected) and tab counts. [FE] | – | `200 { pending, approved, rejected }` | A, ADM |
-| GET | `/requests/{requestId}/approvals` | Approval history and current status (Approvals tab). [SOW "track approval history"] | – | `200 { state, rounds:[{round, submittedAt, items:[{approver, decision, comment, decidedAt}]}] }` | O, P, A, ADM |
-| POST | `/requests/{requestId}/approvals/decision` | Approve or reject, with comment. Resumes the Step Functions workflow (task token). [FE Approve/Reject buttons][SOW 4.5, 5.6] | `{ decision:"APPROVED"\|"REJECTED", comment?, version }` (comment required on reject: [REC], [OPEN 3]) | `200 { decision, requestStatus }`; `409 ALREADY_DECIDED` if not pending | A (assigned approver), ADM |
-| POST | `/approvals/bulk-decision` | Decide several at once. [FE has row checkboxes but no bulk action UI; [REC] only if UI adds it] | `{ items:[{requestId, version}], decision, comment? }` | `207 { results:[{requestId, ok, error?}] }` | A, ADM |
+*Revised in TASK 04a. Approval authority is per request (assigned approvers), never from a global group. All endpoints below are **implemented**, without Step Functions or notifications.*
 
-Multiple approvers, sequential vs parallel, and what makes the request approved: [OPEN 3]. The API returns per-approver items so any model fits.
+| Method | Path | Purpose | Req | Res | Role |
+|---|---|---|---|---|---|
+| GET | `/approvals` | **My** approval inbox (records assigned to the caller), newest first. [FE Approvals page] | Query: `decision=PENDING`(default)`\|APPROVED\|REJECTED\|NOT_REQUIRED`, `q?`, `limit`, `nextToken` | `200 { items:[{ approvalId, requestId, requestNo, title, description, requestedBy:{id,displayName,initials}, category, priority, round, policy, decision, comment, submittedAt, decidedAt, requestStatus, canDecide, blockedReason }], nextToken }` | Any (own records only) |
+| GET | `/approvals/summary` | **My** counts for the KPI cards and tabs (exact count queries). [FE] | – | `200 { pending, approved, rejected }` | Any (own records only) |
+| GET | `/requests/{requestId}/approvals` | Approval history: every round, its assigned approvers, decisions, comments, times. [SOW "track approval history"] | – | `200 { approvalState, approvalPolicy, currentRound, rounds:[{ round, policy, status, submittedAt, submittedBy:{id,displayName,activityRole}, decidedAt, approvers:[{userId, displayName, initials, activityRole, decision, comment, decidedAt}] }] }` | O, P, A, ADM |
+| POST | `/requests/{requestId}/approvals/decision` | Approve or reject the current round. [FE Approve/Reject][SOW 4.5] | `{ decision:"APPROVED"\|"REJECTED", comment? }` (comment **required** on reject, max 1000; `version` not needed, see §12.2) | `200 { requestId, round, decision, requestStatus, roundStatus, version }` | A of **that** request and round (no admin bypass) |
+| POST | `/approvals/bulk-decision` | Decide several at once. **Not implemented** (no bulk UI). | `{ items:[{requestId}], decision, comment? }` | `207 { results:[{requestId, ok, error?}] }` | A |
+
+Policies:
+- `ANY_ONE` (default): one approval approves the request at once. A rejection is recorded, but the request stays pending while any other approver can still decide. It is rejected only when **every** assigned approver has rejected.
+- `ALL`: every assigned approver must approve, and any rejection rejects at once.
+
+Details in §12.2.
 
 ### 3.9 Readiness checklist [SOW 4.6]
 
@@ -338,7 +352,7 @@ Which existing screens and controls bind to which endpoints. [FE]
 | Requests list, search, pagination, sort | `GET /requests?status=&q=&limit=&nextToken=` |
 | "New Request" form submit | `POST /requests` (then optionally `POST .../submit`), `POST .../attachments` for files |
 | Attachment dropzone | `POST .../attachments` -> S3 `PUT` -> `POST .../confirm` |
-| Request details page | `GET /requests/{id}` (+ `/participants`, `/tasks`, `/approvals`, `/checklist`, `/attachments`, `/activity` for tabs) |
+| Request details page | `GET /requests/{id}` (+ `/members`, `/tasks`, `/approvals`, `/checklist`, `/attachments`, `/activity` for tabs) |
 | Details Approve / Reject | `POST /requests/{id}/approvals/decision` |
 | Approvals KPI cards and tabs | `GET /approvals/summary`, `GET /approvals?decision=` |
 | Approvals row Approve / Reject | `POST /requests/{id}/approvals/decision` |
@@ -354,22 +368,25 @@ Changes the UI will need later (not done in this task): sign-in screen, SOW fiel
 
 ## 6. Role permission summary
 
+All columns are **activity roles in one request** (§1.3). ADM = PlatformAdmin who is not a member of that request.
+
 | Capability | O | P | A | ADM |
 |---|---|---|---|---|
-| Create/edit/submit/cancel own request | ✔ | – | – | ✔ |
-| View a request | own | member | assigned | all |
-| Invite participants, create/assign tasks | ✔ | – | – | ✔ |
+| Create a new request (and become its owner) | any active user | | | |
+| View a request | ✔ | ✔ | ✔ | ✔ (read) |
+| Edit / submit / cancel the request | ✔ | – | – | ✔ |
+| Add / remove participants and approvers | ✔ | – | – | ✔ (never themselves as approver) |
 | Confirm/decline own participation | – | ✔ | – | – |
 | Update own task status | if assignee | ✔ | – | ✔ |
 | Update checklist | ✔ | ✔ | – | ✔ |
 | Post execution updates | ✔ | ✔ | – | ✔ |
 | Record validation | ✔ | ✔ | – | ✔ |
-| Approve / reject | – | – | ✔ (assigned) | ✔ |
+| Approve / reject | ✗ (own request) | ✗ (participant) | ✔ (current round, eligible) | ✗ unless assigned as A |
 | Generate / save AI report | ✔ | – | – | ✔ |
 | Close activity | ✔ | – | – | ✔ |
-| Manage users, roles, templates | – | – | – | ✔ |
+| Manage users, org groups, templates | – | – | – | ✔ |
 
-If one person holds several roles, permissions are the union. Whether the owner can approve their own request is [OPEN 3]; the API should reject it by default [REC].
+A person never holds two activity roles in the same request, so there is no "union" inside a request. Self-approval is impossible by construction and is checked again on every decision, including for platform admins.
 
 ---
 
@@ -382,9 +399,9 @@ If one person holds several roles, permissions are the union. Whether the owner 
 
 ## 8. Assumptions made in this document
 1. REST API (not HTTP API) and `/v1` versioning. [REC]
-2. Users may have multiple roles. [OPEN 5]
+2. Roles are activity-scoped; organization groups are only `PlatformAdmin` and `ApprovalEligible`. **Decided in TASK 04a** (closes OPEN 5 for roles).
 3. Responsible employee for the AI report is the request owner. [OPEN 1]
-4. Reject requires a comment. [REC / OPEN 3]
+4. Reject requires a comment; approve takes an optional one. **Decided in TASK 04a** (closes OPEN 3 together with §12.2).
 5. Participants are platform users. [OPEN 4]
 6. Polling is acceptable for notifications. [REC]
 7. Request lifecycle as in `backend-architecture.md` §3.2. [REC / OPEN 2]
@@ -397,7 +414,7 @@ Cognito hosted UI/sign-up flows, WebSocket/real-time, presence, multi-tenant `or
 ## 10. Known limitation to decide
 "Showing 1-5 of 12" and free-text search by title are awkward in DynamoDB (see `database-design.md` access pattern 10). Options: (a) cursor pagination without exact totals plus counts from aggregates, (b) filter within bounded queries, (c) add a search service later. Needs your decision.
 
-## 11. Implementation status (steps 1-2, `backend/`)
+## 11. Implementation status (steps 1-2, `backend/`; items marked "04a" superseded by §12)
 
 | Area | Endpoints implemented |
 |---|---|
@@ -407,17 +424,167 @@ Cognito hosted UI/sign-up flows, WebSocket/real-time, presence, multi-tenant `or
 | Dashboard | `GET /dashboard/summary`, `GET /dashboard/requests-over-time`, `GET /dashboard/upcoming` |
 | Reference | `GET /reference-data` |
 
-Everything else in section 3 is still design only (submit/transition, approvals, participants, tasks, checklist, execution, validation, reports, notifications, schedule/conflicts, users admin, team).
+TASK 04a added: `GET /users`, `GET`/`POST /requests/{id}/members`, `DELETE /requests/{id}/members/{userId}`, `POST /requests/{id}/submit`, `POST /requests/{id}/withdraw` (added after the review), `POST /requests/{id}/approvals/decision`, `GET /requests/{id}/approvals`, `GET /approvals`, `GET /approvals/summary` (see §12).
+
+Everything else in section 3 is still design only (transition/cancel/archive, tasks, checklist, execution, validation, reports, notifications, schedule/conflicts, users admin, team, bulk decisions).
 
 Behaviour that differs from, or narrows, the text above:
 
 1. **Token**: send the Cognito **ID token** in `Authorization` (it carries `email`, `name`, `cognito:groups`). The API Gateway authorizer is a Cognito user pool authorizer.
-2. **Visibility** is currently owner or platform admin only. Participants and assigned approvers are added with those features. A request you cannot see returns `404`, not `403`.
-3. **`POST /requests`** creates a `DRAFT` and requires `title` and `description`; all other fields are optional until the mandatory set is decided (open question 8). Only `MaintenanceOwner` and `PlatformAdmin` may create. `Idempotency-Key` is accepted by CORS but **not implemented yet**.
+2. **Visibility** *(04a)*: ACTIVE members of the request (owner, participants, approvers) and platform admins. A request you cannot see returns `404`, not `403`.
+3. **`POST /requests`** creates a `DRAFT` and requires `title` and `description`; all other fields are optional until the mandatory set is decided (open question 8). *(04a)* Any authenticated user may create and becomes the `OWNER` member. `Idempotency-Key` is accepted by CORS but **not implemented yet**.
 4. **`PATCH /requests/{id}`** requires the current `version`; allowed only in `DRAFT` and `REJECTED` (otherwise `400 INVALID_TRANSITION`). A stale `version` returns `409 VERSION_CONFLICT`.
-5. **`GET /requests`**: `mine=participant` and `mine=approver` return `501 NOT_IMPLEMENTED` until those features exist. No `totalCount` is returned (section 10, option a). `q` matches title or request number, case-insensitive, within the already-selected partition.
-6. **`GET /requests/counts`** and **`/dashboard/summary`**: platform admins read stored aggregates; other users get counts computed from their own requests (capped at 2,000).
-7. **`/dashboard/*` `scope=all`** is allowed for `Approver` and `PlatformAdmin`. Note it returns global counts, which may be broader than what an approver can open; decide whether that is acceptable.
-8. **Attachments**: allowed extensions pdf, doc, docx, xls, xlsx, png with a matching content type, max 10 MB. These come from the hint text on the New Request screen, not from the SOW (open question 7). Upload URL lifetime 300 s. Only the request owner or an admin can add files for now.
+5. **`GET /requests`** *(04a)*: without `mine`, non-admins get every request they are an ACTIVE member of (any role), newest first; platform admins get all requests. `mine=owner` reads the owner index; `mine=participant` / `mine=approver` read the membership index for that role. No `totalCount` is returned (section 10, option a). `q` matches title or request number, case-insensitive.
+6. **`GET /requests/counts`** *(04a)*: same scope as the list. Admins without `mine` read stored aggregates; everyone else gets counts computed from their memberships (capped at 2,000). **`/dashboard/summary`** with `scope=mine` still counts only requests the caller **owns**.
+7. **`/dashboard/*` `scope=all`** *(04a)*: `PlatformAdmin` only. The former global `Approver` group no longer exists.
+8. **Attachments**: allowed extensions pdf, doc, docx, xls, xlsx, png with a matching content type, max 10 MB. These come from the hint text on the New Request screen, not from the SOW (open question 7). Upload URL lifetime 300 s. Only the request owner or an admin can add files for now. *(Fix after the 04a review)* Uploading, confirming and deleting attachments are **locked** while the request is `PENDING_APPROVAL`, `COMPLETED` or `CANCELLED` (`409 ATTACHMENTS_LOCKED`). The status is checked inside the same transaction as the write, so the plan under review cannot change.
 9. **`/reference-data`** returns only known values: categories and priorities from the UI reference, teams and checklist groups from the SOW. `environments`, `cloudPlatforms` and `maintenanceTypes` are empty until you approve the lists, so those request fields accept free text.
 10. **Status mapping**: "In Progress" on the dashboard counts `IN_PROGRESS`, `READINESS` and `VALIDATION`.
+
+## 12. Activity-scoped roles and approvals (TASK 04a, implemented in `backend/`)
+
+Not deployed. Verified locally with a type check, `cdk synth` and a rules test of the authorization and outcome logic (no AWS calls).
+
+### 12.1 Identity, directory and members
+
+- **Org-level groups (Cognito):** `PlatformAdmin` and `ApprovalEligible` only. They are mirrored on sign-in (`GET /me`) as `USER#<id> / ROLE#<group>`, and stale mirrors are deleted on the next sign-in. `GET /me` → `roles` contains only these groups.
+- **Directory `GET /users`** *(privacy fix after the 04a review)*:
+  - Results are `{ id, displayName, initials, approvalEligible }` only. **No email addresses** are returned to anyone.
+  - `q` is required with at least 2 characters (`400` otherwise), so the whole directory cannot be listed.
+  - Search is a case-insensitive name prefix, or an exact email when `q` contains `@`. An email match is returned in the same minimal shape; the address is not echoed.
+  - `approverEligible=true` lists only `ApprovalEligible` users.
+  - Users appear **after their first sign-in**; admin user creation is not implemented.
+- **Members:** one record per (request, user). The creator is written as `OWNER` in the same transaction as the request.
+
+`POST /requests/{id}/members` checks, in this order (first failure wins):
+
+| Check | Error |
+|---|---|
+| Caller is the request's `OWNER` or a `PlatformAdmin` | `403 FORBIDDEN` |
+| Request is not `COMPLETED` / `CANCELLED` | `409 INVALID_STATE` |
+| Request is not `PENDING_APPROVAL` (all assignments locked while pending) | `409 LOCKED_WHILE_PENDING` |
+| Approvers only change in `DRAFT` / `REJECTED` | `409 APPROVERS_LOCKED` |
+| Target has a profile (signed in once) | `404 USER_NOT_FOUND` |
+| Target is active | `409 USER_INACTIVE` |
+| Target is not already an ACTIVE member | `409 ALREADY_ASSIGNED` (same role) / `409 ROLE_CONFLICT` (other role: owners and participants can never be approvers of that request) |
+| Approver ≠ owner | `409 ROLE_CONFLICT` |
+| Nobody, platform admins included, assigns **themselves** as approver | `403 SELF_ASSIGNMENT_FORBIDDEN` |
+| Approver is in `ApprovalEligible` | `409 NOT_ELIGIBLE` |
+| At most 20 approvers / 50 members | `409 APPROVER_LIMIT` / `409 MEMBER_LIMIT` |
+
+- **Removal** is soft: status `REMOVED`, with removed-by snapshot. The record stays for history. The owner cannot be removed (`400 CANNOT_REMOVE_OWNER`), and the same lock rules apply.
+- **Concurrency:** every member change increments the request's internal `membersRev` under the same lock condition, inside one transaction. A concurrent submit or status change makes the change fail with `409 CONCURRENT_UPDATE` instead of silently altering a round.
+- **`GET /requests/{id}`** now also returns `viewer: { activityRole, canEdit, canManageMembers }` for the UI. The backend re-checks on every call.
+
+### 12.2 Submit, decide, history
+
+**Submit** (`POST /requests/{id}/submit`, `{ version }`):
+- Allowed for the owner or an admin, from `DRAFT` / `REJECTED`, with at least 1 and at most 20 ACTIVE approvers.
+- Each approver must still be active and `ApprovalEligible`, otherwise `409 APPROVER_INVALID` with details.
+- One transaction does all of the following:
+  - the request becomes `PENDING_APPROVAL` with `approvalRound + 1`;
+  - a round header `APPRROUND#<n>` is written;
+  - one decision record per approver `APPR#<n>#<approverId>` (`PENDING`, snapshot names, inbox index) is written;
+  - the audit entry `SUBMITTED_FOR_APPROVAL` and the status counters are written.
+- Condition: unchanged `version`, unchanged `membersRev` (exact approver snapshot), status still `DRAFT`/`REJECTED`.
+
+**Decide** (`POST /requests/{id}/approvals/decision`). The caller must pass **all** of these checks. There is **no exception for platform admins**.
+
+| Check | Error |
+|---|---|
+| Request is `PENDING_APPROVAL` | `409 NOT_PENDING` |
+| Caller is not the request owner | `403 SELF_APPROVAL` |
+| Caller is not a participant of this request | `403 SELF_APPROVAL` |
+| Caller is an ACTIVE `APPROVER` member with a record in the **current** round | `403 NOT_ASSIGNED` |
+| Caller's token has `ApprovalEligible` (revocation takes effect within the 1 h token lifetime) | `403 NOT_ELIGIBLE` |
+| Caller's record is still `PENDING` | `409 ALREADY_DECIDED` |
+
+Outcomes:
+
+| Policy | Decision | Result |
+|---|---|---|
+| `ANY_ONE` (default) | approve (also after earlier rejections) | Request `APPROVED` at once; round `APPROVED`; remaining `PENDING` records `NOT_REQUIRED` (`closedReason = APPROVED_BY_OTHER`). Earlier `REJECTED` records stay as recorded. |
+| `ANY_ONE` | reject (comment required), other approvers still pending | Rejection recorded; request **stays `PENDING_APPROVAL`**; round stays `OPEN`; no counters change; other records untouched |
+| `ANY_ONE` | reject (comment required), every other approver already rejected | Request `REJECTED` (editable again); round `REJECTED` |
+| `ALL` | approve, others still pending | Stays `PENDING_APPROVAL`; round `OPEN` |
+| `ALL` | approve, everyone else approved | Request `APPROVED` |
+| `ALL` | reject (comment required) | Request `REJECTED` (editable again); other pending records `NOT_REQUIRED` |
+
+- **Concurrency:** every decision rewrites the request under a version condition, so decisions on one request are serialised. If two approvers decide at the same moment, the server re-reads and retries (up to 3 attempts), which guarantees that the last `ALL` approval completes the round. The client therefore does not send a `version`. After 3 conflicts the call returns `409 CONCURRENT_UPDATE`.
+- **Strongly consistent reads** *(fix after the 04a review)*: submit, decide and withdraw read the request, the caller's membership, the members and the round records with `ConsistentRead`. Before this fix, a fresh request version combined with stale decision records could commit a non-final `ALL` approval after everyone had approved, leaving the request pending.
+- **Record updates alias every attribute name** *(fix after the 04a review)*: `comment` is a DynamoDB reserved word, and the raw name made every rejection fail.
+
+**Withdraw** (`POST /requests/{id}/withdraw`, `{ reason, version }`). This is the recovery path when a round cannot finish: an approver left the organization, lost eligibility, or never answers.
+- **Who and when:** the owner or a platform admin, only while `PENDING_APPROVAL`, with a current `version` and a non-empty reason.
+- **One transaction** (at most 25 items):
+  - the request returns to `DRAFT` with `approvalState = WITHDRAWN`, `withdrawnAt`, `withdrawnBy` and `withdrawReason`;
+  - the round header becomes `WITHDRAWN`;
+  - every still-pending record becomes `NOT_REQUIRED` (`closedReason = WITHDRAWN`); decisions already made stay as they are;
+  - the audit entry `REQUEST_WITHDRAWN` and the status counters are written.
+- **Afterwards:** approvers can be changed and the request resubmitted as a new round. Nothing in the old round is reassigned or edited.
+- **Errors:** `403 FORBIDDEN`, `409 NOT_PENDING`, `409 VERSION_CONFLICT`, `409 CONCURRENT_UPDATE` (a decision happened at the same time).
+- **Non-final decisions** (an `ALL` approval with others pending, or an `ANY_ONE` rejection with others pending) still rewrite the request with `version + 1` under the version condition. This serialises concurrent decisions: when two approvers make the last two decisions at once, one transaction fails and its retry reads the other's committed decision, so a round can never stay open after its outcome is determined.
+- **While an `ANY_ONE` round is open after a rejection:**
+  - The rejecting approver sees their record under `GET /approvals?decision=REJECTED` (with `requestStatus: PENDING_APPROVAL`), and their counts include it.
+  - The owner sees the rejection and its comment in `GET /requests/{id}/approvals`.
+  - The owner cannot edit while the request is pending; to act on the feedback before others decide, the owner withdraws, edits and resubmits.
+- **Resubmission** after rejection starts round `n + 1`. Earlier rounds and their records are kept unchanged.
+- **Inbox** (`GET /approvals`): only the caller's own records. `canDecide` / `blockedReason` reuse the decision checks; they are UI hints only.
+- **History** (`GET /requests/{id}/approvals`): all rounds with approvers, decisions, comments and times.
+
+### 12.3 Platform admin rules (decision 5)
+- May view all requests, list all requests and manage members on any request.
+- Cannot assign **themselves** as approver.
+- Cannot approve unless explicitly assigned by someone else **and** `ApprovalEligible`.
+- Cannot approve a request they own or participate in.
+
+### 12.4 Audit (append-only, under the request)
+Actions: `REQUEST_CREATED`, `REQUEST_UPDATED`, `MEMBER_ADDED`, `MEMBER_REMOVED`, `APPROVER_ASSIGNED`, `APPROVER_REMOVED`, `SUBMITTED_FOR_APPROVAL`, `APPROVAL_DECIDED`.
+
+Every entry stores:
+- the actor id, a snapshot of the actor's name, and their activity role at that moment (`OWNER`, `PARTICIPANT`, `APPROVER` or `PLATFORM_ADMIN`);
+- the target user, name snapshot and activity role where relevant;
+- the round, policy, decision and comment where relevant;
+- a timestamp.
+
+Audit entries, round headers and decision records are never deleted.
+
+### 12.5 Not implemented in 04a
+- Step Functions workflow, notifications and reminders.
+- Scheduling-conflict check on submit.
+- Approval groups (data model only, `database-design.md` 3.6).
+- Bulk decisions.
+- Admin user creation and org-group management in the app (use the Cognito console or CLI).
+- Reassigning approvers inside an open round (by design: withdraw, change approvers, resubmit).
+- Participant invitation responses.
+- `PATCH /members/{userId}`.
+
+These features have no UI yet (that is TASK 04b).
+
+### 12.6 Review fixes and tests (after the TASK 04a review)
+
+| Finding | Fix |
+|---|---|
+| C1: rejections failed (`comment` is a reserved word) | All decision-record attribute names are aliased (`decisionRecordUpdate` in `lib/approvals.ts`) |
+| C2: stale reads could leave an `ALL` round pending, or drop an approver from a submit snapshot | Strongly consistent reads on submit, decide and withdraw |
+| I7: no recovery for a stuck round | `POST /requests/{id}/withdraw` (§12.2) |
+| I5: attachments could change during approval | Locked while pending, completed or cancelled (§11 item 8) |
+| I3: directory exposed emails | No email in results; `q` must be at least 2 characters (§12.1) |
+| I6: role-mirror writes could be dropped | Unprocessed batch writes are retried; after 5 attempts the call fails with `503` |
+| Minor: stale `approvalDecidedAt` after resubmission | Cleared on submit |
+| Minor: a foreign `nextToken` caused a `500` | `400 Invalid nextToken` when the token's key does not belong to the queried partition |
+
+**Tests:** `npm test` in `backend/` (`node:test` + `tsx`, no extra packages, no AWS). The suite covers:
+- the pure rule functions;
+- handler flows against an in-memory fake of the DynamoDB client: submit, decide (ANY_ONE and ALL, retries), withdraw, members, the attachment lock, directory privacy, continuation-token checks and batch-write retry;
+- a lint that fails if any expression sent by a handler uses a reserved word without an alias;
+- a check that approval transitions only use consistent reads.
+
+The fake does **not** evaluate conditions or apply transaction writes, so real DynamoDB behaviour is still unverified until deployment.
+
+**ANY_ONE rule (decided after the review):** one approval approves; the request is rejected only when every assigned approver has rejected (§12.2). Tests cover mixed decisions, multiple approvers, single approvers, double decisions and three concurrency cases:
+- a concurrent last rejection: the retry rejects the request;
+- a concurrent approval: the rejection gets `409 NOT_PENDING`;
+- a rejection racing an approval: the retry approves.
+
+**Still open:** stale eligibility for departed users (review item 2; withdraw is the recovery path).
