@@ -21,6 +21,7 @@ import { batchGet, queryAll, queryCount, queryPage, TABLE, transact, txCondition
 import { badRequest, conflict } from "../lib/errors";
 import { assertTokenPartition, decodeToken, encodeToken, json, parseLimit, router, type Ctx } from "../lib/http";
 import { assertView, getMember, isActive, listMembers, memberKey } from "../lib/members";
+import { validateSubmitFields } from "../lib/lifecycle";
 import { indexAttrs, loadRequest, reqKey } from "../lib/requests";
 import { statsOnStatusChange } from "../lib/stats";
 import { loadUserFacts } from "../lib/users";
@@ -61,6 +62,8 @@ const submit = async ({ caller, path, body }: Ctx) => {
     request: r,
     approvers: approverMembers.map((m) => ({ member: m, profileActive: !!facts.get(m.userId)?.active, eligible: !!facts.get(m.userId)?.eligible })),
   });
+  // TASK 06: the SOW fields must be filled before approvers are asked to review the plan.
+  validateSubmitFields(r);
 
   const now = new Date().toISOString();
   const round = (r.approvalRound ?? 0) + 1;

@@ -30,18 +30,33 @@ export interface Counts {
   byStatus: Partial<Record<ApiStatus, number>>;
 }
 
-export interface CreateRequestInput {
-  title: string;
-  description: string;
+/** Fields shared by create and edit (backend parseFields). Dropdown values come from GET /reference-data. */
+export interface RequestFieldsInput {
+  title?: string;
+  description?: string;
   category?: string;
   priority?: ApiPriority;
-  /** Backend field "schedule.start". The current form only has a single "Target Date". */
-  schedule?: { start: string };
+  environment?: string;
+  cloudPlatform?: string;
+  maintenanceType?: string;
+  scope?: string;
+  affectedSystems?: string[];
+  links?: { label: string; url: string }[];
+  /** Backend field "schedule.start". */
+  schedule?: { start: string; end?: string };
+}
+
+export interface CreateRequestInput extends RequestFieldsInput {
+  title: string;
+  description: string;
 }
 
 export interface ReferenceData {
   categories: string[];
   priorities: string[];
+  environments?: string[];
+  cloudPlatforms?: string[];
+  maintenanceTypes?: string[];
 }
 
 /* ---------- Calls ---------- */
@@ -52,6 +67,26 @@ export const getCounts = (signal?: AbortSignal) => api<Counts>("requests/counts"
 
 export const createRequest = (input: CreateRequestInput) =>
   api<{ id: string; requestNo: string }>("requests", { method: "POST", body: input });
+
+/** PATCH /requests/{id}: only DRAFT / REJECTED requests can be edited; `version` guards against lost updates. */
+export const updateRequest = (id: string, version: number, fields: RequestFieldsInput) =>
+  api<{ id: string; version: number }>(`requests/${encodeURIComponent(id)}`, { method: "PATCH", body: { ...fields, version } });
+
+/** POST /requests/{id}/transition: the next lifecycle step (Approved > Scheduled > ... > Completed). */
+export const transitionRequest = (id: string, to: ApiStatus, version: number) =>
+  api<{ requestId: string; status: ApiStatus; previousStatus: ApiStatus; version: number }>(`requests/${encodeURIComponent(id)}/transition`, {
+    method: "POST",
+    body: { to, version },
+  });
+
+/** POST /requests/{id}/cancel: allowed before execution starts; the reason is required. */
+export const cancelRequest = (id: string, reason: string, version: number) =>
+  api<{ requestId: string; status: ApiStatus; version: number }>(`requests/${encodeURIComponent(id)}/cancel`, {
+    method: "POST",
+    body: { reason, version },
+  });
+
+export const MAX_CANCEL_REASON = 1000;
 
 export const getReferenceData = (signal?: AbortSignal) => api<ReferenceData>("reference-data", { signal });
 
@@ -113,7 +148,10 @@ export interface RequestDetail extends RequestSummary {
     activityRole: "OWNER" | "PARTICIPANT" | "APPROVER" | null;
     canEdit: boolean;
     canManageMembers: boolean;
+    /** Lifecycle actions offered to this caller right now. */
+    lifecycle?: { next: ApiStatus | null; canCancel: boolean };
   };
+  cancelReason?: string;
 }
 
 export const getRequest = (id: string, signal?: AbortSignal) =>

@@ -537,15 +537,15 @@ Branches are stacked (`task-05-notifications` is built on `task-04`). Merge in o
 |---|---|---|---|---|
 | Sign-in, profile (`/me`) | ✅ | ✅ | partial | ❌ |
 | Create / list / view requests, counts, search | ✅ | ✅ | ✅ | ❌ |
-| Edit request (`PATCH`) | ✅ | ❌ no edit UI | ✅ | ❌ |
-| SOW request fields (environment, platform, systems, type, scope, schedule, links) | ✅ accepted | ❌ not on form | — | ❌ |
+| Edit request (`PATCH`) | ✅ | ✅ Edit dialog (Draft / Rejected only) | ✅ | ❌ |
+| SOW request fields (environment, platform, systems, type, scope, schedule, links) | ✅ validated against the confirmed lists | ✅ New Request and Edit (live mode only) | ✅ | ❌ |
 | Attachments (upload, list, download, delete, lock) | ✅ | ✅ (delete has no UI) | ✅ | ❌ |
 | Dashboard | ✅ | ✅ | build + byte check | ❌ |
 | Activity members and directory | ✅ | ✅ | ✅ | ❌ |
 | Approvals (policies, submit, decide, withdraw, history, inbox) | ✅ | ✅ | ✅ | ❌ |
 | In-app notifications and bell | ✅ | ✅ | ✅ | ❌ |
 | Email notifications | ✅ built, **disabled** | — | ✅ (test sender) | ❌ |
-| Lifecycle after approval (Scheduled … Completed, Cancelled) | ❌ statuses defined, no transitions | ❌ | — | ❌ |
+| Lifecycle after approval (Scheduled … Completed, Cancelled) | ✅ `/transition`, `/cancel` | ✅ Lifecycle card | ✅ | ❌ |
 | Participation confirmation, tasks | ❌ | ❌ | — | ❌ |
 | Readiness, execution, validation, final report, AI summary | ❌ | ❌ | — | ❌ |
 | Schedule, Reports, Team, Settings pages, conflicts | ❌ | placeholders | — | ❌ |
@@ -577,12 +577,24 @@ Draft → Pending Approval → Approved → Scheduled → Readiness → In Progr
 
 Today `GET /reference-data` returns empty lists for these three fields; TASK 06 should fill them.
 
+### 14.3 TASK 06 as implemented (branch `task-06-request-lifecycle`, uncommitted)
+- **Transitions:** `POST /v1/requests/{id}/transition {to, version}` moves exactly one step: Approved → Scheduled → Readiness → In Progress → Validation → Completed. `POST /v1/requests/{id}/cancel {reason, version}` cancels. Each call is one DynamoDB transaction (version and status conditions, a `REQUEST_STATUS_CHANGED` audit entry, status counters). Every active member except the actor is notified; the cancel reason is not put in the notification.
+- **Rules chosen for the open points (confirm with the owner):**
+  - Who: the owner or a platform admin (same as editing). Participants and approvers cannot.
+  - Required before submit: environment, cloud platform, maintenance type and a schedule start date (`REQUEST_INCOMPLETE`, 400).
+  - Cancel is allowed from Draft, Rejected, Approved, Scheduled and Readiness. Not from Pending Approval (withdraw first), In Progress, Validation, Completed or Cancelled. A reason is required.
+  - Moving to Scheduled needs a schedule start date (`SCHEDULE_REQUIRED`).
+- **Form:** environment, cloud platform and maintenance type accept only the confirmed values; `GET /reference-data` returns them. New Request and a new Edit dialog (Draft / Rejected) have these fields plus scope, affected systems (comma-separated) and links (one URL per line). Mock mode is unchanged.
+- **Request Details:** a Lifecycle card shows the stepper and offers next step, Edit and Cancel, based on `viewer.lifecycle` from `GET /requests/{id}`.
+- **Checks run:** backend type check, 90 / 90 tests, `cdk synth`; frontend 53 / 53 tests and build. Still unverified against real AWS (nothing is deployed).
+- **Not done:** editing a request after approval (rescheduling); the Dashboard still groups Readiness and Validation under "In Progress".
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
 | # | Task | SOW | What's missing | Depends on | Still needs a decision |
 |---|---|---|---|---|---|
-| **06 (A)** | **Request lifecycle and complete request form.** **Recommended next. NOT started, NOT implemented.** | 4.2, 4.4 | Transitions Approved → Scheduled → Readiness → In Progress → Validation → Completed, plus Cancel (`/transition`, `/cancel` are designed but not built); SOW fields and the confirmed dropdowns on the form; editing in the UI; `REQUEST_STATUS_CHANGED` audit entries and notifications | — | Who may move each step (suggested: owner or admin); which fields are required at submit; from which statuses Cancel is allowed (suggested: before In Progress) |
+| **06 (A)** | **Request lifecycle and complete request form. DONE locally on branch `task-06-request-lifecycle` (not committed, not pushed).** See section 14.3. | 4.2, 4.4 | — | — | Rules chosen for the open points are listed in 14.3; confirm them with the owner |
 | 07 (B) | Participation and tasks | 4.3, 4.4 | Confirm or decline participation; tasks (owner, deadline, status); task progress on the Dashboard; editing a member's specialty or responsibilities | members (done) | Team-level tasks; what declining means |
 | 08 (C) | Readiness checklist | 4.6 | Template and per-request items; participant updates; gate before In Progress | 06 | Template content; who may mark items |
 | 09 (D) | Maintenance execution tracking | 4.7 (heading only) | Progress notes, issues, Activity tab | 06, 07 | **Everything**: the SOW has no criteria |

@@ -13,6 +13,7 @@ import { useApprovalHistory, useMembers } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
+import LifecycleCard from "../components/LifecycleCard";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
@@ -161,6 +162,16 @@ function RequestDetailsView({ id }: { id: string }) {
             <div className="card"><h3>Created on</h3>{r.createdOn}</div>
             {ctx && live ? (
               <>
+                <LifecycleCard
+                  requestId={live.id}
+                  status={live.status}
+                  version={live.version}
+                  viewer={live.viewer}
+                  fields={live.fields}
+                  cancelReason={live.cancelReason}
+                  onChanged={refreshAll}
+                  notify={(kind, text) => setFlash({ kind, text })}
+                />
                 <ApproversCard ctx={ctx} />
                 <ParticipantsCard ctx={ctx} />
                 {/* Only an assigned, eligible approver with a pending decision gets controls. */}

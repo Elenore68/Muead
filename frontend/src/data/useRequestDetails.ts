@@ -4,6 +4,7 @@ import { ApiClientError, errorMessage } from "../api/client";
 import { getRequest, listAttachments, type ApiStatus, type Attachment, type RequestDetail } from "../api/requests";
 import { formatDate, formatDateTime, priorityLabel, statusLabel } from "../api/labels";
 import { requests as mockRequests } from "./mock";
+import type { RequestFormValues } from "../components/RequestFields";
 
 /** What the Request Details page renders, independent of the data source. */
 export interface RequestView {
@@ -29,6 +30,9 @@ export interface RequestView {
     approvalRound: number;
     approvalState: string;
     viewer: RequestDetail["viewer"];
+    /** Raw values for the edit dialog. */
+    fields: RequestFormValues;
+    cancelReason?: string;
   };
 }
 
@@ -47,6 +51,12 @@ const safeLinks = (links: RequestDetail["links"]) =>
       return false;
     }
   });
+
+/** yyyy-mm-dd in the browser's time zone (what <input type="date"> expects). */
+const toDateInput = (iso: string) => {
+  const d = new Date(iso);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
 
 const fromApi = (r: RequestDetail): RequestView => {
   const extra: RequestView["extra"] = [];
@@ -77,6 +87,21 @@ const fromApi = (r: RequestDetail): RequestView => {
       approvalRound: r.approvalRound ?? 0,
       approvalState: r.approvalState ?? "NONE",
       viewer: r.viewer,
+      cancelReason: r.cancelReason,
+      fields: {
+        title: r.title,
+        description: r.description,
+        category: r.category ?? "",
+        priority: r.priority ?? "",
+        environment: r.environment ?? "",
+        cloudPlatform: r.cloudPlatform ?? "",
+        maintenanceType: r.maintenanceType ?? "",
+        scope: r.scope ?? "",
+        affectedSystems: (r.affectedSystems ?? []).join(", "),
+        links: (r.links ?? []).map((l) => l.url).join("\n"),
+        start: r.schedule?.start ? toDateInput(r.schedule.start) : "",
+        end: r.schedule?.end ? toDateInput(r.schedule.end) : "",
+      },
     },
   };
 };
