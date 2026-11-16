@@ -56,10 +56,20 @@ export class FakeDb {
       case "GetCommand":
         return { Item: structuredClone(this.get(input.Key.PK, input.Key.SK)) };
       case "PutCommand":
+        // Minimal condition support: create-only puts.
+        if (input.ConditionExpression === "attribute_not_exists(PK)" && this.get(input.Item.PK, input.Item.SK)) throw conditionFailed();
         this.put(input.Item);
         return {};
-      case "UpdateCommand":
-        return { Attributes: structuredClone(this.get(input.Key.PK, input.Key.SK) ?? input.Key) };
+      case "UpdateCommand": {
+        const existing = this.get(input.Key.PK, input.Key.SK);
+        if (input.ConditionExpression === "attribute_exists(PK)" && !existing) throw conditionFailed();
+        // Minimal SET support for `#r = if_not_exists(#r, :now)` (notification read time).
+        if (existing && /#r = if_not_exists\(#r, :now\)/.test(input.UpdateExpression ?? "")) {
+          const attr = input.ExpressionAttributeNames["#r"];
+          existing[attr] ??= input.ExpressionAttributeValues[":now"];
+        }
+        return { Attributes: structuredClone(existing ?? input.Key) };
+      }
       case "DeleteCommand":
         this.store.delete(`${input.Key.PK}|${input.Key.SK}`);
         return {};
@@ -111,12 +121,15 @@ export class FakeDb {
     if (begins) items = items.filter((it) => String(it[begins[1]] ?? "").startsWith(v[begins[2]]));
     if (equals) items = items.filter((it) => it[equals[1]] === v[equals[2]]);
     if (input.FilterExpression?.includes("#st = :a")) items = items.filter((it) => it.status === v[":a"]);
+    if (input.FilterExpression?.includes("attribute_not_exists(readAt)")) items = items.filter((it) => !it.readAt);
     items.sort((a, b) => String(a[skAttr]).localeCompare(String(b[skAttr])));
     if (input.ScanIndexForward === false) items.reverse();
     if (input.Select === "COUNT") return { Count: items.length };
     return { Items: items.map((i) => structuredClone(i)) };
   }
 }
+
+const conditionFailed = () => Object.assign(new Error("The conditional request failed"), { name: "ConditionalCheckFailedException" });
 
 /* ------------------------------------------------------------------ expression lint */
 

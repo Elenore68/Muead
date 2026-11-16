@@ -308,7 +308,12 @@ Note: the AI Activity Summary card on the dashboard reference is per-activity in
 | POST | `/notifications/{notificationId}/read` | Mark read. | – | `204` | Any (own) |
 | POST | `/notifications/read-all` | Mark all read. | – | `204` | Any (own) |
 
-Notifications are created by the backend (workflow, stream and scheduler Lambdas), never by the client. Emails go through SNS/SES; no client endpoint sends email.
+**Implemented in TASK 05** (see §13). Notifications are created only by the backend notifier from audit entries, never by the client. Every endpoint works on the caller's own notifications only. Email goes through SES and is **disabled by default**; no client endpoint sends email.
+
+Response shapes:
+- `GET /notifications`: `{ items:[{ id, type, title, body, requestId (null when the recipient lost access), requestNo, createdAt, readAt }], nextToken }`, newest first. Query: `unread?=true`, `limit` (default 20, max 50), `nextToken`.
+- `GET /notifications/unread-count`: `{ count }`.
+- `POST /notifications/{id}/read` and `POST /notifications/read-all`: `204`. A notification id that is not yours returns `404`.
 
 ### 3.16 Team [FE]
 
@@ -588,3 +593,69 @@ The fake does **not** evaluate conditions or apply transaction writes, so real D
 - a rejection racing an approval: the retry approves.
 
 **Still open:** stale eligibility for departed users (review item 2; withdraw is the recovery path).
+
+## 13. Notifications (TASK 05, implemented in `backend/`; not deployed)
+
+### 13.1 How notifications are produced
+1. Every state change writes an append-only audit entry under the request (§12.4).
+2. The table's DynamoDB stream delivers each new audit entry to the **notifier** Lambda. The event-source filter passes only `INSERT` of `entityType = AUDIT`.
+3. The notifier:
+   - reads the request and its members (strongly consistent);
+   - decides the recipients;
+   - writes one notification per recipient (create-only, so retries never duplicate);
+   - if email is enabled, sends an email per recipient.
+4. Failures are reported per stream record (`reportBatchItemFailures`, 5 retries, batch bisect). A notification problem never blocks or rolls back the user's action.
+
+### 13.2 Events and recipients
+These rules apply to every event:
+- The actor is **never** notified about their own action.
+- Recipients must be **ACTIVE members of that request** when the event is processed. Platform admins and other non-members are not notified.
+- The only exception is the person just removed, who is told once, without a link.
+- Notifications contain no comments, reasons or other request content; those stay in the request.
+
+| Audit action | Notification | Recipients |
+|---|---|---|
+| `REQUEST_CREATED` | `REQUEST_CREATED` | Owner, unless the owner created it (normally nobody) |
+| `MEMBER_ADDED`, `APPROVER_ASSIGNED` | `MEMBER_ASSIGNED` | The new member; the owner if someone else (an admin) assigned |
+| `MEMBER_REMOVED`, `APPROVER_REMOVED` | `MEMBER_REMOVED` | The removed person (no link); the owner if someone else removed |
+| `SUBMITTED_FOR_APPROVAL` | `APPROVAL_REQUIRED` | The round's approvers |
+| `SUBMITTED_FOR_APPROVAL` | `REQUEST_SUBMITTED` | Participants; the owner if someone else submitted |
+| `APPROVAL_DECIDED`, round still open | `APPROVAL_DECISION_RECORDED` | Owner |
+| `APPROVAL_DECIDED`, final | `REQUEST_APPROVED` or `REQUEST_REJECTED` | Owner, participants and the other approvers |
+| `REQUEST_WITHDRAWN` | `REQUEST_WITHDRAWN` | Approvers whose pending decisions were closed, and participants; the owner if someone else withdrew |
+| `REQUEST_UPDATED` (field edits) | none | Minor updates are not notified |
+
+**Reserved actions.** These have rules and tests, but **no feature writes them yet**. Each future feature must write the audit entry with the listed fields:
+
+| Audit action (fields) | Recipients |
+|---|---|
+| `REQUEST_STATUS_CHANGED` (`toStatus`) | All active members |
+| `TASK_ASSIGNED` (`assigneeId`, `taskTitle`) | The assignee |
+| `TASK_COMPLETED` (`assignedBy`, `taskTitle`) | Owner and the person who assigned it |
+| `READINESS_UPDATED` | Owner |
+| `MAINTENANCE_COMPLETED` | All active members |
+| `VALIDATION_COMPLETED` | Owner and participants |
+| `FINAL_REPORT_AVAILABLE` | All active members |
+
+### 13.3 Email (disabled by default)
+- **Settings:** `infra/config.ts` → `email: { enabled: false, fromAddress: "" }`.
+  - While disabled, the stack grants **no** `ses:*` permission and the notifier never creates an SES client.
+  - Every notification is stored with `emailStatus = DISABLED`.
+- **To enable later (not done):**
+  1. Verify the sender identity in SES (us-east-1).
+  2. Request SES production access.
+  3. Set `enabled: true` and `fromAddress`.
+  4. Deploy.
+
+  Synth fails if `enabled` is true without a sender address. The permission is then limited to `ses:SendEmail` on that one identity.
+- **When enabled:**
+  - The email respects the recipient's `notificationPrefs.email` (`PATCH /me`); `false` means no email.
+  - It contains the notification text and a link to the request (`APP_URL` = the first allowed origin).
+  - Delivery failures are recorded as `FAILED` and never block the in-app notification.
+
+### 13.4 Not implemented
+- Reminders and scheduled notifications (EventBridge).
+- SNS publishing.
+- A preferences UI (only `PATCH /me` exists).
+- A full notification history page; the bell shows the latest 20.
+- A dead-letter queue: records that fail all retries are dropped and logged.

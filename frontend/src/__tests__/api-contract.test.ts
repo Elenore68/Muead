@@ -6,6 +6,7 @@ vi.mock("../config", () => ({ config: { apiEnabled: true, apiBaseUrl: "https://a
 import { ApiClientError, configureClient } from "../api/client";
 import { addMember, listMembers, removeMember, searchUsers } from "../api/members";
 import { decide, getApprovalHistory, getApprovalSummary, listApprovals, setApprovalPolicy, submitRequest, withdrawRequest } from "../api/approvals";
+import { getUnreadCount, listNotifications, markAllNotificationsRead, markNotificationRead } from "../api/notifications";
 
 type Call = { url: string; method: string; body: unknown; auth: string | null };
 let calls: Call[] = [];
@@ -85,5 +86,23 @@ describe("approvals", () => {
     const err = await decide("R1", "APPROVED").catch((e) => e);
     expect(err).toBeInstanceOf(ApiClientError);
     expect(err).toMatchObject({ status: 409, code: "ALREADY_DECIDED", message: "You have already decided on this round" });
+  });
+});
+
+describe("notifications (TASK 05)", () => {
+  test("GET /notifications and /notifications/unread-count", async () => {
+    await listNotifications({ limit: 20 });
+    expect(last()).toMatchObject({ method: "GET", url: `${B}/notifications?limit=20` });
+    await listNotifications({ unread: true, nextToken: "t" });
+    expect(last().url).toBe(`${B}/notifications?unread=true&nextToken=t`);
+    await getUnreadCount();
+    expect(last().url).toBe(`${B}/notifications/unread-count`);
+  });
+  test("POST read and read-all (204)", async () => {
+    nextResponse = { status: 204 };
+    await markNotificationRead("01JD00000000000000000000A1");
+    expect(last()).toMatchObject({ method: "POST", url: `${B}/notifications/01JD00000000000000000000A1/read`, body: undefined });
+    await markAllNotificationsRead();
+    expect(last()).toMatchObject({ method: "POST", url: `${B}/notifications/read-all` });
   });
 });

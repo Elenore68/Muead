@@ -143,10 +143,22 @@ Default items are created from a template when the request enters the readiness 
 `result` (`PASSED`, `FAILED`, `PASSED_WITH_ISSUES`, `NOT_APPLICABLE`), `notes`, `confirmedBy`, `confirmedAt`, `version`.
 Remaining issues: `PK=REQ#<id>`  `SK=ISSUE#<issueId>` – `description`, `severity`, `domain`, `status` (`OPEN`, `RESOLVED`), `reportedBy`, `createdAt`.
 
-### 3.10 Notification [SOW 4.4, 5.5]
-`PK=USER#<recipientId>`  `SK=NOTIF#<createdAt>#<notifId>`
-`type` (`INVITATION`, `APPROVAL_REQUESTED`, `APPROVAL_DECIDED`, `TASK_ASSIGNED`, `REMINDER`, `CONFLICT_ALERT`, `REPORT_READY`, …), `title`, `body`, `requestId`, `channel` (`IN_APP`, `EMAIL`), `readAt` (null if unread), `emailStatus` (`SENT`, `FAILED`, `BOUNCED`), `ttl` (e.g. 180 days) [REC].
-Unread count for the bell [FE]: query items with `readAt` absent, or keep an `unreadCount` on the user item updated by the stream [REC].
+### 3.10 Notification [SOW 4.4, 5.5] (revised and implemented in TASK 05)
+`PK=USER#<recipientId>`  `SK=NOTIF#<id>`. The `id` is the ULID of the audit entry that caused it, so it sorts by time and a retried stream record overwrites nothing.
+
+| Attribute | Notes |
+|---|---|
+| `type` | `REQUEST_CREATED`, `MEMBER_ASSIGNED`, `MEMBER_REMOVED`, `REQUEST_SUBMITTED`, `APPROVAL_REQUIRED`, `APPROVAL_DECISION_RECORDED`, `REQUEST_APPROVED`, `REQUEST_REJECTED`, `REQUEST_WITHDRAWN`, `REQUEST_STATUS_CHANGED`, `TASK_ASSIGNED`, `TASK_COMPLETED`, `READINESS_UPDATED`, `MAINTENANCE_COMPLETED`, `VALIDATION_COMPLETED`, `FINAL_REPORT_AVAILABLE` |
+| `title`, `body` | Short text: request number, title and who did what. No comments or reasons |
+| `requestId`, `requestNo`, `linkToRequest` | `linkToRequest=false` for removal notifications (the recipient lost access) |
+| `actorId`, `actorName`, `sourceAction`, `createdAt` | From the audit entry |
+| `readAt` | Absent until read; the first read time is kept |
+| `emailStatus` | `DISABLED` (default), `SENT`, `FAILED`, `SKIPPED_PREFERENCE`, `SKIPPED_NO_ADDRESS` |
+| `ttl` | Epoch seconds, created + 180 days. The table's TTL attribute deletes expired items automatically |
+
+- **No index.** Lists and counts query the user's own partition (`begins_with(SK, "NOTIF#")`), newest first.
+- **Unread count:** a count query with the filter `attribute_not_exists(readAt)`. Its cost grows with the user's notifications in the last 180 days, which is acceptable at organization scale.
+- **Written by:** only the notifier Lambda, from the table's DynamoDB stream (NEW_IMAGE, filtered to `AUDIT` inserts).
 
 ### 3.11 Report [SOW 4.8, 4.10, 5.4]
 `PK=REQ#<id>`  `SK=REPORT#<reportId>`
@@ -249,4 +261,7 @@ Differences between this design and the code written so far. The design above st
   - **Consistency** *(review fix)*: submit, decide and withdraw use strongly consistent reads (request, membership, members, round records). Lists and inbox reads stay eventually consistent; index reads always are.
   - **Expression names** *(review fix)*: several stored attribute names are DynamoDB reserved words (`comment`, `status`, `count`, `timezone`). Every update, condition or filter expression must alias them through `ExpressionAttributeNames`. The test suite lints all expressions that the handlers send.
   - **Directory privacy** *(review fix)*: profiles and group mirror items still store `email` (needed for exact lookup), but no endpoint returns another user's email.
-- **Not built yet**: tasks, checklist, execution updates, validation, notifications, reports, approval groups, participant invitation responses, and post-approval status transitions.
+- **Notifications (TASK 05)**: implemented as in 3.10.
+  - The table now has a **stream** (NEW_IMAGE) and **TTL on `ttl`**. Both are in-place table settings; no data is affected.
+  - The notifier reads the request and members with strongly consistent reads, and writes notifications with a create-only condition, so they are idempotent.
+- **Not built yet**: tasks, checklist, execution updates, validation, reports, approval groups, participant invitation responses, and post-approval status transitions.
