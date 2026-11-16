@@ -23,6 +23,7 @@ import {
 } from "../lib/members";
 import { loadRequest, reqKey, STATUSES, type Status } from "../lib/requests";
 import { loadUserFacts } from "../lib/users";
+import { parseMemberPatch, parseParticipationBody, requestOpenCheck, validateMemberPatch, validateParticipation } from "../lib/tasks";
 import { initialsOf } from "../lib/auth";
 
 const COGNITO_SUB = /^[0-9a-f-]{36}$/i;
@@ -207,9 +208,110 @@ const remove = async ({ caller, path }: Ctx) => {
   return json(204);
 };
 
+/* ------------------------------------------------------------------ POST /requests/{id}/participation (TASK 07) */
+/** A participant confirms or declines. Only for themselves. Declining keeps them on the request; the owner is told. */
+const respond = async ({ caller, path, body }: Ctx) => {
+  const { response, note } = parseParticipationBody(body);
+  const r = await loadRequest(path.requestId, { consistent: true });
+  const access = await assertView(r, caller, { consistent: true });
+  const member = await getMember(r.id, caller.userId, { consistent: true });
+  validateParticipation({ callerId: caller.userId, targetId: caller.userId, member, requestStatus: r.status as Status });
+
+  const now = new Date().toISOString();
+  try {
+    await transact([
+      {
+        Update: {
+          TableName: TABLE,
+          Key: memberKey(r.id, caller.userId),
+          UpdateExpression: note
+            ? "SET #p = :resp, participationAt = :now, participationNote = :note"
+            : "SET #p = :resp, participationAt = :now REMOVE participationNote",
+          ConditionExpression: "#st = :active AND activityRole = :part",
+          ExpressionAttributeNames: { "#st": "status", "#p": "participation" },
+          ExpressionAttributeValues: { ":resp": response, ":now": now, ":active": "ACTIVE", ":part": "PARTICIPANT", ...(note ? { ":note": note } : {}) },
+        },
+      },
+      requestOpenCheck(r.id),
+      {
+        Put: {
+          TableName: TABLE,
+          Item: auditItem(r.id, { userId: caller.userId, displayName: caller.displayName, activityRole: access.auditRole }, response === "CONFIRMED" ? "PARTICIPATION_CONFIRMED" : "PARTICIPATION_DECLINED", {
+            targetUserId: caller.userId,
+            targetName: caller.displayName,
+            hasNote: !!note,
+          }),
+        },
+      },
+    ]);
+  } catch (e) {
+    if (txConditionFailed(e)) throw conflict("CONCURRENT_UPDATE", CHANGED);
+    throw e;
+  }
+  return json(200, { requestId: r.id, userId: caller.userId, participation: response, participationAt: now, participationNote: note ?? null });
+};
+
+/* ------------------------------------------------------------------ PATCH /requests/{id}/members/{userId} (TASK 07) */
+/** Owner or admin edits a member's specialty / responsibilities. Roles never change here. */
+const patchMember = async ({ caller, path, body }: Ctx) => {
+  const userId = path.userId;
+  if (!COGNITO_SUB.test(userId)) throw new ApiError(404, "NOT_FOUND", "Member not found");
+  const patch = parseMemberPatch(body, TEAMS);
+  const r = await loadRequest(path.requestId, { consistent: true });
+  const access = await assertView(r, caller, { consistent: true });
+  const member = await getMember(r.id, userId, { consistent: true });
+  validateMemberPatch({ access, member, requestStatus: r.status as Status });
+
+  const sets: string[] = [];
+  const removes: string[] = [];
+  const names: Record<string, string> = { "#st": "status" };
+  const values: Record<string, unknown> = { ":active": "ACTIVE", ":owner": "OWNER" };
+  for (const k of ["specialty", "responsibilities"] as const) {
+    if (!(k in patch)) continue;
+    if (patch[k] === null) removes.push(k);
+    else {
+      sets.push(`${k} = :${k}`);
+      values[`:${k}`] = patch[k];
+    }
+  }
+  const updated = { ...member, ...Object.fromEntries(Object.entries(patch).map(([k, v]) => [k, v ?? undefined])) };
+  for (const k of removes) delete updated[k];
+  try {
+    await transact([
+      {
+        Update: {
+          TableName: TABLE,
+          Key: memberKey(r.id, userId),
+          UpdateExpression: [sets.length ? `SET ${sets.join(", ")}` : "", removes.length ? `REMOVE ${removes.join(", ")}` : ""].filter(Boolean).join(" "),
+          ConditionExpression: "#st = :active AND activityRole <> :owner",
+          ExpressionAttributeNames: names,
+          ExpressionAttributeValues: values,
+        },
+      },
+      requestOpenCheck(r.id),
+      {
+        Put: {
+          TableName: TABLE,
+          Item: auditItem(r.id, { userId: caller.userId, displayName: caller.displayName, activityRole: access.auditRole }, "MEMBER_UPDATED", {
+            targetUserId: userId,
+            targetName: member!.displayName,
+            changedFields: Object.keys(patch),
+          }),
+        },
+      },
+    ]);
+  } catch (e) {
+    if (txConditionFailed(e)) throw conflict("CONCURRENT_UPDATE", CHANGED);
+    throw e;
+  }
+  return json(200, toMemberApi(updated));
+};
+
 export const handler = router({
   "GET /requests/{requestId}/members": list,
   "POST /requests/{requestId}/members": add,
   "DELETE /requests/{requestId}/members/{userId}": remove,
+  "PATCH /requests/{requestId}/members/{userId}": patchMember,
+  "POST /requests/{requestId}/participation": respond,
 });
 

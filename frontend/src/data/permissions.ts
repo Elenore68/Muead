@@ -70,3 +70,25 @@ export const canEditRequest = (viewer: Viewer | undefined, status: ApiStatus): b
 /** TASK 06: lifecycle buttons come from the backend's `viewer.lifecycle`; nothing is guessed from roles. */
 export const lifecycleActions = (viewer: Viewer | undefined): { next: ApiStatus | null; canCancel: boolean } =>
   viewer?.lifecycle ?? { next: null, canCancel: false };
+
+/* ---------- TASK 07 ---------- */
+const TASKS_FROZEN: ApiStatus[] = ["COMPLETED", "CANCELLED"];
+
+/** Owner or admin: create, edit, reassign, delete tasks (not on finished requests). */
+export const canManageTasks = (viewer: Viewer | undefined, status: ApiStatus): boolean => !!viewer?.canEdit && !TASKS_FROZEN.includes(status);
+
+/** The assignee may change only the status of their own task. */
+export const canChangeTaskStatus = (viewer: Viewer | undefined, status: ApiStatus, assigneeId: string, userId: string | undefined): boolean =>
+  !TASKS_FROZEN.includes(status) && (!!viewer?.canEdit || (!!userId && assigneeId === userId && viewer?.activityRole != null));
+
+/** People who can be given a task: the owner and participants who have not declined. */
+export const assignableToTasks = (members: Member[]): Member[] =>
+  members.filter((m) => m.status === "ACTIVE" && (m.activityRole === "OWNER" || (m.activityRole === "PARTICIPANT" && m.participation !== "DECLINED")));
+
+/** The signed-in person may answer only for themselves, as a participant, on an unfinished request. */
+export const canRespondToParticipation = (member: Member | undefined, userId: string | undefined, status: ApiStatus): boolean =>
+  !!member && !!userId && member.userId === userId && member.status === "ACTIVE" && member.activityRole === "PARTICIPANT" && !TASKS_FROZEN.includes(status);
+
+/** Owner or admin may edit a member's details (not the owner row), not on finished requests. */
+export const canEditMemberDetails = (viewer: Viewer | undefined, status: ApiStatus, member: Member): boolean =>
+  !!viewer?.canManageMembers && member.activityRole !== "OWNER" && member.status === "ACTIVE" && !TASKS_FROZEN.includes(status);

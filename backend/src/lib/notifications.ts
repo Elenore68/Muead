@@ -24,6 +24,7 @@ export type NotificationType =
   | "REQUEST_APPROVED"
   | "REQUEST_REJECTED"
   | "REQUEST_WITHDRAWN"
+  | "PARTICIPATION_RESPONDED"
   | "REQUEST_STATUS_CHANGED"
   | "TASK_ASSIGNED"
   | "TASK_COMPLETED"
@@ -155,6 +156,13 @@ export const planNotifications = (audit: Item, request: RequestLite, members: Me
       add([owner], "REQUEST_WITHDRAWN", `${request.requestNo} withdrawn`, `${actor} withdrew ${ref} from approval.`);
       break;
     }
+
+    case "PARTICIPATION_CONFIRMED":
+      add([owner], "PARTICIPATION_RESPONDED", `${actor} confirmed ${request.requestNo}`, `${actor} confirmed participation in ${ref}.`);
+      break;
+    case "PARTICIPATION_DECLINED":
+      add([owner], "PARTICIPATION_RESPONDED", `${actor} declined ${request.requestNo}`, `${actor} declined to participate in ${ref}. Reassign their work or remove them.`);
+      break;
 
     /* ---------------- reserved: emitted by features that are not built yet ---------------- */
     case "REQUEST_STATUS_CHANGED": {

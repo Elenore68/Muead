@@ -1,15 +1,17 @@
 import { useState } from "react";
-import { Plus, Send, Undo2, X } from "lucide-react";
+import { Check, Pencil, Plus, Send, Undo2, X } from "lucide-react";
 import { ApiClientError, errorMessage } from "../api/client";
 import { MAX_REASON, setApprovalPolicy, submitRequest, withdrawRequest, type ApprovalPolicy } from "../api/approvals";
-import { removeMember, type AssignableRole, type Member, type MembersResponse } from "../api/members";
+import { MAX_PARTICIPATION_NOTE, removeMember, respondToParticipation, type AssignableRole, type Member, type MembersResponse } from "../api/members";
 import type { ApiStatus } from "../api/requests";
-import { policyLabel, specialtyLabel } from "../api/labels";
+import { participationLabel, policyLabel, specialtyLabel } from "../api/labels";
 import {
   activeApprovers,
   canChangeApprovers,
   canChangeParticipants,
   canChangePolicy,
+  canEditMemberDetails,
+  canRespondToParticipation,
   canSubmit,
   canWithdraw,
   type Viewer,
@@ -17,6 +19,7 @@ import {
 import type { ResourceState } from "../data/useResource";
 import AddMemberDialog from "./AddMemberDialog";
 import ConfirmDialog from "./ConfirmDialog";
+import MemberDetailsDialog from "./MemberDetailsDialog";
 import TextActionDialog from "./TextActionDialog";
 import { Person } from "./ui";
 
@@ -46,6 +49,7 @@ const memberRows = (ctx: ActivityContext, role: AssignableRole): Member[] =>
 
 function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; role: AssignableRole; canChange: boolean; empty: string }) {
   const [removing, setRemoving] = useState<Member | null>(null);
+  const [editing, setEditing] = useState<Member | null>(null);
   if (ctx.members.kind === "loading" || ctx.members.kind === "idle") return <p className="cell-sub" role="status">Loading…</p>;
   if (ctx.members.kind === "error") {
     return (
@@ -66,12 +70,27 @@ function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; ro
             <li key={m.userId}>
               <div className="member-main">
                 <Person name={m.displayName} initials={m.initials} />
-                {canChange && (
-                  <button type="button" className="icon-x" onClick={() => setRemoving(m)} aria-label={`Remove ${m.displayName}`} title="Remove">
-                    <X size={16} />
-                  </button>
-                )}
+                <span style={{ display: "flex", gap: 2 }}>
+                  {canEditMemberDetails(ctx.viewer, ctx.status, m) && (
+                    <button type="button" className="icon-x" onClick={() => setEditing(m)} aria-label={`Edit ${m.displayName}`} title="Edit details">
+                      <Pencil size={16} />
+                    </button>
+                  )}
+                  {canChange && (
+                    <button type="button" className="icon-x" onClick={() => setRemoving(m)} aria-label={`Remove ${m.displayName}`} title="Remove">
+                      <X size={16} />
+                    </button>
+                  )}
+                </span>
               </div>
+              {m.activityRole === "PARTICIPANT" && m.participation && (
+                <div>
+                  <span className={`pill ${m.participation === "DECLINED" ? "st-rejected" : m.participation === "CONFIRMED" ? "st-done" : "st-pending"}`}>
+                    {participationLabel(m.participation)}
+                  </span>
+                  {m.participation === "DECLINED" && m.participationNote && <span className="cell-sub"> {m.participationNote}</span>}
+                </div>
+              )}
               {(m.specialty || m.responsibilities) && (
                 <div className="cell-sub">
                   {[specialtyLabel(m.specialty), m.responsibilities].filter(Boolean).join(" · ")}
@@ -80,6 +99,18 @@ function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; ro
             </li>
           ))}
         </ul>
+      )}
+      {editing && (
+        <MemberDetailsDialog
+          requestId={ctx.requestId}
+          member={editing}
+          onClose={() => setEditing(null)}
+          onSaved={() => {
+            setEditing(null);
+            ctx.notify("success", `${editing.displayName} was updated.`);
+            ctx.onChanged();
+          }}
+        />
       )}
       {removing && (
         <ConfirmDialog
@@ -210,10 +241,60 @@ export function ParticipantsCard({ ctx }: { ctx: ActivityContext }) {
   const max = ctx.members.kind === "ready" ? ctx.members.data.limits.maxMembers : 50;
   const changeParticipants = canChangeParticipants(ctx.viewer, ctx.status);
   const activeCount = members.filter((m) => m.status === "ACTIVE").length;
+  const me = members.find((m) => m.userId === ctx.callerId && m.status === "ACTIVE");
+  const [answering, setAnswering] = useState<"" | "CONFIRMED">("");
+  const [declining, setDeclining] = useState(false);
+  const canAnswer = canRespondToParticipation(me, ctx.callerId, ctx.status);
+  const confirm = async () => {
+    setAnswering("CONFIRMED");
+    try {
+      await respondToParticipation(ctx.requestId, "CONFIRMED");
+      ctx.notify("success", "Your participation is confirmed.");
+      ctx.onChanged();
+    } catch (e) {
+      report(ctx, e);
+    } finally {
+      setAnswering("");
+    }
+  };
   return (
     <div className="card">
       <h3>Participants</h3>
       <MembersBody ctx={ctx} role="PARTICIPANT" canChange={changeParticipants} empty="No participants yet." />
+      {canAnswer && (
+        <div className="part-answer" role="group" aria-label="Your participation">
+          <span className="cell-sub">
+            {me?.participation === "CONFIRMED" ? "You confirmed." : me?.participation === "DECLINED" ? "You declined." : "Will you take part?"}
+          </span>
+          {me?.participation !== "CONFIRMED" && (
+            <button type="button" className="btn btn-primary" onClick={confirm} disabled={answering !== ""}>
+              <Check size={16} />{answering ? "Saving…" : "Confirm participation"}
+            </button>
+          )}
+          {me?.participation !== "DECLINED" && (
+            <button type="button" className="btn btn-outline" onClick={() => setDeclining(true)} disabled={answering !== ""}>Decline</button>
+          )}
+        </div>
+      )}
+      {declining && (
+        <TextActionDialog
+          title="Decline participation"
+          intro="You stay on the request until the owner removes you, and the owner is told. You will not be given new tasks. You can confirm later."
+          label="Note" required={false} maxLength={MAX_PARTICIPATION_NOTE} submitLabel="Decline" busyLabel="Saving…" tone="reject"
+          onClose={() => setDeclining(false)}
+          onSubmit={async (note) => {
+            try {
+              await respondToParticipation(ctx.requestId, "DECLINED", note || undefined);
+            } catch (e) {
+              if (e instanceof ApiClientError && e.status === 409) ctx.onChanged();
+              throw e;
+            }
+            setDeclining(false);
+            ctx.notify("success", "You declined to participate. The owner was notified.");
+            ctx.onChanged();
+          }}
+        />
+      )}
       {changeParticipants && activeCount < max && (
         <div className="card-actions">
           <button type="button" className="btn btn-outline" onClick={() => setAdding(true)}><Plus size={16} />Add participant</button>

@@ -667,3 +667,14 @@ These rules apply to every event:
 - `GET /v1/requests/{requestId}` adds `viewer.lifecycle = { next: Status | null, canCancel: boolean }`.
 - `POST /v1/requests/{requestId}/submit` returns `400 REQUEST_INCOMPLETE` unless environment, cloudPlatform, maintenanceType and schedule.start are set.
 - `environment`, `cloudPlatform` and `maintenanceType` accept only the values returned by `GET /v1/reference-data`; others return `400` with issue `enum`.
+
+## 15. TASK 07: participation and tasks (implemented)
+- `POST /v1/requests/{requestId}/participation` body `{ "response": "CONFIRMED" | "DECLINED", "note"?: string (max 500) }`. Caller must be an ACTIVE PARTICIPANT of the request (`404` otherwise, `409 NOT_A_PARTICIPANT` for owner/approvers, `409 INVALID_STATE` when finished). Response `{ requestId, userId, participation, participationAt, participationNote }`. Audit `PARTICIPATION_CONFIRMED` / `PARTICIPATION_DECLINED`.
+- Members (`GET /requests/{id}/members`) now include `participation` (`PENDING | CONFIRMED | DECLINED`, `null` for non-participants), `participationAt`, `participationNote`.
+- `PATCH /v1/requests/{requestId}/members/{userId}` body `{ "specialty"?: team | null, "responsibilities"?: string | null }`. Owner or admin; not for the owner row (`400 CANNOT_EDIT_OWNER`).
+- `GET /v1/requests/{requestId}/tasks` -> `{ items: Task[], progress: { total, done, inProgress, percent } }` (any member or admin).
+- `POST /v1/requests/{requestId}/tasks` body `{ title, description?, assigneeId, dueDate? (yyyy-mm-dd) }` -> `201 Task`. Errors: `403`, `409 ASSIGNEE_NOT_MEMBER | ASSIGNEE_IS_APPROVER | PARTICIPATION_DECLINED | TASK_LIMIT | INVALID_STATE | CONCURRENT_UPDATE`.
+- `PATCH /v1/requests/{requestId}/tasks/{taskId}` body `{ version, title?, description?|null, assigneeId?, dueDate?|null, status? }`. Owner/admin: any field. Assignee: `status` only (`403` otherwise). `409 VERSION_CONFLICT` on a stale version.
+- `DELETE /v1/requests/{requestId}/tasks/{taskId}` -> `204` (owner/admin).
+- Task: `{ id, title, description, status, assignee: {id, displayName, initials}, dueDate, overdue, createdBy, createdAt, updatedAt, completedAt, version }`. `overdue` is true for an unfinished task whose due date is before today (UTC).
+- Audit actions: `TASK_ASSIGNED`, `TASK_COMPLETED`, `TASK_UPDATED`, `TASK_DELETED`, `MEMBER_UPDATED`.

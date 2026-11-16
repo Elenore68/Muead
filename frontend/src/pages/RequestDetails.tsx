@@ -9,14 +9,17 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
-import { useApprovalHistory, useMembers } from "../data/useActivity";
+import { useApprovalHistory, useMembers, useTasks } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
 import LifecycleCard from "../components/LifecycleCard";
+import TasksTab from "../components/TasksTab";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
+// TASK 07: the Tasks tab exists only in live mode, so mock mode keeps the original tabs.
+const LIVE_TABS = ["Details", "Tasks", "Activity", "Approvals", "Attachments"];
 
 export default function RequestDetails() {
   const { id = "" } = useParams();
@@ -35,6 +38,7 @@ function RequestDetailsView({ id }: { id: string }) {
   // Live mode only (disabled, no request, in mock mode).
   const members = useMembers(id);
   const history = useApprovalHistory(id);
+  const tasks = useTasks(id, tab === "Tasks");
   const { profile } = useAuth();
   const [flash, setFlash] = useState<Flash>(null);
 
@@ -42,7 +46,8 @@ function RequestDetailsView({ id }: { id: string }) {
     void refresh();
     members.refresh();
     history.refresh();
-  }, [refresh, members.refresh, history.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+    tasks.refresh();
+  }, [refresh, members.refresh, history.refresh, tasks.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -134,8 +139,20 @@ function RequestDetailsView({ id }: { id: string }) {
           <button className="btn btn-outline" onClick={() => setFlash(null)}>Dismiss</button>
         </div>
       )}
-      <Tabs items={TABS} active={tab} onChange={setTab} />
-      {tab === "Attachments" && config.apiEnabled ? (
+      <Tabs items={config.apiEnabled ? LIVE_TABS : TABS} active={tab} onChange={setTab} />
+      {tab === "Tasks" && live ? (
+        <TasksTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          userId={profile?.id}
+          tasks={tasks.state}
+          members={members.state.kind === "ready" ? members.state.data.items : []}
+          retry={tasks.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Attachments" && config.apiEnabled ? (
         <AttachmentsTab requestId={id} owner={r.owner} {...attachments} />
       ) : tab === "Approvals" && live ? (
         <ApprovalHistory state={history.state} onRetry={history.retry} />
