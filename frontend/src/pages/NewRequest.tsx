@@ -4,6 +4,7 @@ import { CheckCircle2, CalendarDays, UploadCloud, FilePlus2 } from "lucide-react
 import { Topbar } from "../components/Layout";
 import { config } from "../config";
 import { ApiClientError } from "../api/client";
+import RequestFields, { EMPTY_VALUES, FALLBACK_LISTS, parseLinks, parseSystems, type Lists, type RequestFormValues } from "../components/RequestFields";
 import { ACCEPT_ATTR, checkFile, createRequest, getReferenceData, uploadAttachment, type ApiPriority } from "../api/requests";
 
 const tips = [
@@ -32,12 +33,22 @@ export default function NewRequest() {
   const [fileErrors, setFileErrors] = useState<string[]>([]);
   const [dragging, setDragging] = useState(false);
   const fileInput = useRef<HTMLInputElement>(null);
+  // TASK 06 (live mode only): SOW fields. Mock mode keeps the original form.
+  const [extra, setExtra] = useState<RequestFormValues>(EMPTY_VALUES);
+  const [lists, setLists] = useState<Lists>(FALLBACK_LISTS);
 
   useEffect(() => {
     if (!config.apiEnabled) return;
     const ac = new AbortController();
     getReferenceData(ac.signal).then(
-      (r) => r.categories.length && setCategories(r.categories),
+      (r) => {
+        if (r.categories.length) setCategories(r.categories);
+        setLists({
+          environments: r.environments?.length ? r.environments : FALLBACK_LISTS.environments,
+          cloudPlatforms: r.cloudPlatforms?.length ? r.cloudPlatforms : FALLBACK_LISTS.cloudPlatforms,
+          maintenanceTypes: r.maintenanceTypes?.length ? r.maintenanceTypes : FALLBACK_LISTS.maintenanceTypes,
+        });
+      },
       () => {}, // keep the fallback list; the form must stay usable
     );
     return () => ac.abort();
@@ -67,6 +78,13 @@ export default function NewRequest() {
     for (const k of ["title", "description", "category", "priority", "target"]) {
       if (!String(f.get(k) ?? "").trim()) return setErr({ message: "Please fill in all required fields.", details: [] });
     }
+    if (config.apiEnabled) {
+      for (const k of ["environment", "cloudPlatform", "maintenanceType"] as const) {
+        if (!extra[k]) return setErr({ message: "Please fill in all required fields.", details: [] });
+      }
+      const bad = parseLinks(extra.links).error;
+      if (bad) return setErr({ message: bad, details: [] });
+    }
     setErr(null);
 
     if (!config.apiEnabled) {
@@ -84,6 +102,12 @@ export default function NewRequest() {
         priority: String(f.get("priority")) as ApiPriority,
         // The form has one "Target Date"; it is saved as the start of the schedule (local midnight).
         schedule: { start: new Date(`${String(f.get("target"))}T00:00:00`).toISOString() },
+        environment: extra.environment,
+        cloudPlatform: extra.cloudPlatform,
+        maintenanceType: extra.maintenanceType,
+        ...(extra.scope.trim() ? { scope: extra.scope.trim() } : {}),
+        ...(parseSystems(extra.affectedSystems).length ? { affectedSystems: parseSystems(extra.affectedSystems) } : {}),
+        ...(parseLinks(extra.links).links.length ? { links: parseLinks(extra.links).links } : {}),
       });
     } catch (ex) {
       const details = ex instanceof ApiClientError ? ex.details.map((d) => `${d.field ?? "field"}: ${d.issue}`) : [];
@@ -132,6 +156,9 @@ export default function NewRequest() {
             <div className="field"><label htmlFor="target">Target Date <span className="req">*</span></label>
               <input id="target" name="target" type="date" className="input" aria-label="Target date" disabled={submitting} /></div>
           </div>
+          {config.apiEnabled && (
+            <RequestFields idPrefix="new" values={extra} lists={lists} disabled={submitting} onChange={(p) => setExtra((cur) => ({ ...cur, ...p }))} />
+          )}
           <div className="field"><label htmlFor="files">Attachments (Optional)</label>
             <div
               className="drop"

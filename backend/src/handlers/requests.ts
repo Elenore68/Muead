@@ -5,6 +5,7 @@ import { auditItem } from "../lib/audit";
 import { batchGet, ddb, itemKey, queryPage, TABLE, transact, txConditionFailed, type Item } from "../lib/db";
 import { ApiError, badRequest, conflict } from "../lib/errors";
 import { assertTokenPartition, decodeToken, encodeToken, json, parseLimit, router, type Ctx } from "../lib/http";
+import { availableActions, parseCancelBody, parseTransitionBody, transitionAttrs, validateCancel, validateTransition } from "../lib/lifecycle";
 import { assertEdit, assertView, buildMember, memberRequests, type ActivityRole } from "../lib/members";
 import {
   EDITABLE_STATUSES,
@@ -18,7 +19,7 @@ import {
   toSummary,
   type Status,
 } from "../lib/requests";
-import { countsFromItems, globalCounts, ownerRequests, statsOnCategoryChange, statsOnCreate } from "../lib/stats";
+import { countsFromItems, globalCounts, ownerRequests, statsOnCategoryChange, statsOnCreate, statsOnStatusChange } from "../lib/stats";
 
 /* ------------------------------------------------------------------ POST /requests */
 /** Decision 1: any active authenticated user can create a request and becomes its OWNER. */
@@ -213,7 +214,13 @@ const getRequest = async ({ caller, path }: Ctx) => {
   return json(200, {
     ...toApi(r),
     // What the caller may do here; the backend enforces it again on every call.
-    viewer: { activityRole: access.role ?? null, canEdit: access.canEdit, canManageMembers: access.canManageMembers },
+    viewer: {
+      activityRole: access.role ?? null,
+      canEdit: access.canEdit,
+      canManageMembers: access.canManageMembers,
+      // TASK 06: lifecycle actions offered to this caller (the backend re-checks on every call).
+      lifecycle: availableActions(r.status, access.canEdit),
+    },
   });
 };
 
@@ -269,10 +276,76 @@ const patchRequest = async ({ caller, path, body }: Ctx) => {
   return json(200, toApi(next));
 };
 
+/* ------------------------------------------------------------------ lifecycle (TASK 06) */
+/** Request copy with new attributes and recomputed index keys. `undefined` values remove the attribute. */
+const withChanges = (r: Item, changes: Item): Item => {
+  const { GSI1PK, GSI1SK, GSI2PK, GSI2SK, GSI3PK, GSI3SK, ...base } = r;
+  const n: Item = { ...base, ...changes, updatedAt: new Date().toISOString(), version: r.version + 1 };
+  for (const [k, v] of Object.entries(changes)) if (v === undefined) delete n[k];
+  return { ...n, ...indexAttrs(n) };
+};
+
+/** One transaction: the request (version + status conditions), its audit entry and the status counters. */
+const changeStatus = async (p: { r: Item; to: Status; caller: Ctx["caller"]; auditRole: string; extra: Item; reason?: string }) => {
+  const { r, to, caller } = p;
+  const now = new Date().toISOString();
+  const next = withChanges(r, { status: to, ...transitionAttrs(to, now, caller.userId, p.reason) });
+  try {
+    await transact([
+      {
+        Put: {
+          TableName: TABLE,
+          Item: next,
+          ConditionExpression: "#v = :v AND #s = :from",
+          ExpressionAttributeNames: { "#v": "version", "#s": "status" },
+          ExpressionAttributeValues: { ":v": r.version, ":from": r.status },
+        },
+      },
+      {
+        Put: {
+          TableName: TABLE,
+          Item: auditItem(r.id, { userId: caller.userId, displayName: caller.displayName, activityRole: p.auditRole }, "REQUEST_STATUS_CHANGED", {
+            fromStatus: r.status,
+            toStatus: to,
+            ...p.extra,
+          }),
+        },
+      },
+      ...statsOnStatusChange(r.status, to),
+    ]);
+  } catch (e) {
+    if (txConditionFailed(e, 0)) throw conflict("CONCURRENT_UPDATE", "The request was changed by someone else. Reload and try again.");
+    throw e;
+  }
+  return json(200, { requestId: r.id, status: to, previousStatus: r.status, version: next.version });
+};
+
+/* POST /requests/{id}/transition  { to, version }: the next lifecycle step, one step at a time. */
+const transition = async ({ caller, path, body }: Ctx) => {
+  const { to, version } = parseTransitionBody(body);
+  const r = await loadRequest(path.requestId, { consistent: true });
+  const access = await assertView(r, caller, { consistent: true });
+  validateTransition({ canEdit: access.canEdit, request: r, to });
+  if (version !== r.version) throw conflict("VERSION_CONFLICT", "The request was changed by someone else. Reload and try again.");
+  return changeStatus({ r, to, caller, auditRole: access.auditRole, extra: {} });
+};
+
+/* POST /requests/{id}/cancel  { reason, version } */
+const cancel = async ({ caller, path, body }: Ctx) => {
+  const { reason, version } = parseCancelBody(body);
+  const r = await loadRequest(path.requestId, { consistent: true });
+  const access = await assertView(r, caller, { consistent: true });
+  validateCancel({ canEdit: access.canEdit, request: r });
+  if (version !== r.version) throw conflict("VERSION_CONFLICT", "The request was changed by someone else. Reload and try again.");
+  return changeStatus({ r, to: "CANCELLED", caller, auditRole: access.auditRole, extra: { reason }, reason });
+};
+
 export const handler = router({
   "GET /requests": listRequests,
   "POST /requests": createRequest,
   "GET /requests/counts": requestCounts,
   "GET /requests/{requestId}": getRequest,
   "PATCH /requests/{requestId}": patchRequest,
+  "POST /requests/{requestId}/transition": transition,
+  "POST /requests/{requestId}/cancel": cancel,
 });

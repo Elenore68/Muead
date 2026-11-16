@@ -30,7 +30,8 @@ const seedRequest = (o: Record<string, unknown> = {}) =>
   db.put({
     PK: `REQ#${RID}`, SK: "META", entityType: "REQUEST", id: RID, requestNo: "REQ-0001", title: "Patch DB", description: "Monthly patching",
     status: "DRAFT", approvalState: "NONE", approvalRound: 0, approvalPolicy: "ANY_ONE", ownerId: OWNER, ownerName: "Owner", ownerInitials: "Ow",
-    membersRev: 1, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:00:00.000Z", version: 1, category: "IT", ...o,
+    membersRev: 1, createdAt: "2026-11-10T00:00:00.000Z", updatedAt: "2026-11-10T00:00:00.000Z", version: 1, category: "IT",
+    environment: "Production", cloudPlatform: "AWS", maintenanceType: "Patching", scheduleStart: "2026-12-01T00:00:00.000Z", ...o,
   });
 const seedMember = (userId: string, activityRole: string, status = "ACTIVE") =>
   db.put({ PK: `REQ#${RID}`, SK: `MEMBER#${userId}`, entityType: "MEMBER", requestId: RID, userId, displayName: userId.slice(-4), initials: "XX", activityRole, status });
@@ -368,6 +369,17 @@ describe("POST /requests/{id}/submit", () => {
     for (const r of consistentReads()) assert.equal(r.consistent, true, `read ${r.key} must be consistent`);
   });
 
+  test("TASK 06: a request without the SOW fields cannot be submitted", async () => {
+    seedRequest({ environment: undefined, scheduleStart: undefined });
+    seedMember(OWNER, "OWNER");
+    seedMember(SARA, "APPROVER");
+    seedProfile(SARA, true);
+    const res = await submit(OWNER, { version: 1 });
+    assert.equal(res.status, 400);
+    assert.equal(res.body.error.code, "REQUEST_INCOMPLETE");
+    assert.deepEqual(res.body.error.details.map((d: any) => d.field), ["environment", "schedule.start"]);
+    assert.equal(db.transactions().length, 0);
+  });
   test("no approvers -> 400; ineligible approver -> 409", async () => {
     seedRequest();
     seedMember(OWNER, "OWNER");

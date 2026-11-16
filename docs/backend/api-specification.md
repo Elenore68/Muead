@@ -659,3 +659,11 @@ These rules apply to every event:
 - A preferences UI (only `PATCH /me` exists).
 - A full notification history page; the bell shows the latest 20.
 - A dead-letter queue: records that fail all retries are dropped and logged.
+
+## 14. TASK 06: request lifecycle (implemented)
+- `POST /v1/requests/{requestId}/transition` body `{ "to": "<next status>", "version": n }`. Allowed only along APPROVED → SCHEDULED → READINESS → IN_PROGRESS → VALIDATION → COMPLETED, by the owner or a platform admin. Response `{ requestId, status, previousStatus, version }`. Errors: `403 FORBIDDEN`, `404`, `409 INVALID_TRANSITION`, `409 VERSION_CONFLICT`, `409 CONCURRENT_UPDATE`, `400 SCHEDULE_REQUIRED` (to SCHEDULED without a start date).
+- `POST /v1/requests/{requestId}/cancel` body `{ "reason": string (1..1000), "version": n }`. Allowed from DRAFT, REJECTED, APPROVED, SCHEDULED, READINESS. Same errors as above.
+- Both write a `REQUEST_STATUS_CHANGED` audit entry (`fromStatus`, `toStatus`, and `reason` for cancel) in the same transaction.
+- `GET /v1/requests/{requestId}` adds `viewer.lifecycle = { next: Status | null, canCancel: boolean }`.
+- `POST /v1/requests/{requestId}/submit` returns `400 REQUEST_INCOMPLETE` unless environment, cloudPlatform, maintenanceType and schedule.start are set.
+- `environment`, `cloudPlatform` and `maintenanceType` accept only the values returned by `GET /v1/reference-data`; others return `400` with issue `enum`.

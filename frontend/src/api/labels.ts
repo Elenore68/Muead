@@ -62,3 +62,30 @@ export const blockedReasonLabel = (code: string | null): string => {
       return "Not available";
   }
 };
+
+/* ---------- TASK 06: lifecycle ---------- */
+/** Precise stage names (the status pill groups Readiness and Validation under "In Progress"). */
+export const stageLabel = (s: ApiStatus): string =>
+  ({
+    DRAFT: "Draft",
+    PENDING_APPROVAL: "Pending Approval",
+    APPROVED: "Approved",
+    REJECTED: "Rejected",
+    SCHEDULED: "Scheduled",
+    READINESS: "Readiness",
+    IN_PROGRESS: "In Progress",
+    VALIDATION: "Validation",
+    COMPLETED: "Completed",
+    CANCELLED: "Cancelled",
+  })[s] ?? s;
+/** The forward path shown as a stepper. Rejected and Cancelled are exits, not steps. */
+export const LIFECYCLE_STEPS: ApiStatus[] = ["DRAFT", "PENDING_APPROVAL", "APPROVED", "SCHEDULED", "READINESS", "IN_PROGRESS", "VALIDATION", "COMPLETED"];
+/** Button text for moving to a status. */
+export const advanceLabel = (to: ApiStatus): string =>
+  ({
+    SCHEDULED: "Mark as scheduled",
+    READINESS: "Start readiness",
+    IN_PROGRESS: "Start maintenance",
+    VALIDATION: "Start validation",
+    COMPLETED: "Mark as completed",
+  } as Partial<Record<ApiStatus, string>>)[to] ?? `Move to ${stageLabel(to)}`;

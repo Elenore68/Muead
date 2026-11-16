@@ -1,6 +1,7 @@
 import { GetCommand } from "@aws-sdk/lib-dynamodb";
 import { ddb, TABLE, type Item } from "./db";
 import { badRequest, notFound } from "./errors";
+import { CLOUD_PLATFORMS, ENVIRONMENTS, MAINTENANCE_TYPES } from "./lifecycle";
 
 export const STATUSES = [
   "DRAFT",
@@ -93,6 +94,11 @@ const str = (v: unknown, field: string, max: number, required = false): string |
   return t;
 };
 
+const oneOf = (v: string | undefined, field: string, allowed: readonly string[]): string | undefined => {
+  if (v !== undefined && !allowed.includes(v)) throw badRequest(`${field} must be one of: ${allowed.join(", ")}`, [{ field, issue: "enum" }]);
+  return v;
+};
+
 const isoDate = (v: unknown, field: string): string => {
   if (typeof v !== "string" || Number.isNaN(Date.parse(v))) throw badRequest(`${field} must be an ISO-8601 date-time`, [{ field, issue: "format" }]);
   return new Date(v).toISOString();
@@ -128,9 +134,10 @@ export const parseFields = (body: Record<string, unknown>, mode: "create" | "pat
   };
   if (req || "title" in body) set("title", str(body.title, "title", 200, true));
   if (req || "description" in body) set("description", str(body.description, "description", 5000, true));
-  if ("environment" in body) set("environment", str(body.environment, "environment", 60));
-  if ("cloudPlatform" in body) set("cloudPlatform", str(body.cloudPlatform, "cloudPlatform", 60));
-  if ("maintenanceType" in body) set("maintenanceType", str(body.maintenanceType, "maintenanceType", 60));
+  // Confirmed dropdown values (PROJECT-HANDOVER.md 14.1); anything else is rejected.
+  if ("environment" in body) set("environment", oneOf(str(body.environment, "environment", 60), "environment", ENVIRONMENTS));
+  if ("cloudPlatform" in body) set("cloudPlatform", oneOf(str(body.cloudPlatform, "cloudPlatform", 60), "cloudPlatform", CLOUD_PLATFORMS));
+  if ("maintenanceType" in body) set("maintenanceType", oneOf(str(body.maintenanceType, "maintenanceType", 60), "maintenanceType", MAINTENANCE_TYPES));
   if ("scope" in body) set("scope", str(body.scope, "scope", 5000));
   if ("category" in body) set("category", str(body.category, "category", 60));
   if ("priority" in body) {

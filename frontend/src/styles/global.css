@@ -264,3 +264,13 @@ td { padding: 12px var(--s-3); border-top: 1px solid var(--c-border); vertical-a
 .notif-item { width: 100%; display: flex; flex-direction: column; gap: 2px; text-align: start; background: #fff; border: 1px solid var(--c-border); border-radius: var(--r-sm); padding: 8px var(--s-3); }
 .notif-item.unread { border-inline-start: 3px solid var(--c-primary); background: var(--st-progress-bg); }
 .notif-item span { font-size: 13px; }
+
+/* TASK 06: request lifecycle stepper (existing tokens only) */
+.stepper { list-style: none; margin: var(--s-3) 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.stepper .step { display: flex; align-items: center; gap: var(--s-2); font-size: 13px; color: var(--c-text-muted, inherit); }
+.stepper .step::before { content: ""; width: 10px; height: 10px; border-radius: 50%; border: 2px solid var(--c-primary); background: transparent; flex: none; }
+.stepper .step.done::before { background: var(--c-primary); }
+.stepper .step.current { font-weight: 700; color: var(--c-primary-600); }
+.stepper .step.current::before { background: var(--c-primary); box-shadow: 0 0 0 3px #efe5fb; }
+.stepper .step.off { opacity: 0.45; }
+.stepper .step.off::before { border-color: currentColor; }

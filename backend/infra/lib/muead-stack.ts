@@ -270,6 +270,8 @@ export class MueadStack extends cdk.Stack {
       { method: "GET", path: "requests/counts" },
       { method: "GET", path: "requests/{requestId}" },
       { method: "PATCH", path: "requests/{requestId}" },
+      { method: "POST", path: "requests/{requestId}/transition" },
+      { method: "POST", path: "requests/{requestId}/cancel" },
     ]);
     wire(fnAttachments, [
       { method: "GET", path: "requests/{requestId}/attachments" },

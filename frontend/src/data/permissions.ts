@@ -63,3 +63,10 @@ export const assignableUsers = <U extends { id: string }>(users: U[], members: M
   const taken = new Set(members.filter((m) => m.status === "ACTIVE").map((m) => m.userId));
   return users.filter((u) => !taken.has(u.id) && !(role === "APPROVER" && u.id === callerId));
 };
+
+/** TASK 06: the owner (or an admin) may edit the plan only while it is a draft or was rejected. */
+export const canEditRequest = (viewer: Viewer | undefined, status: ApiStatus): boolean => !!viewer?.canEdit && APPROVER_EDITABLE.includes(status);
+
+/** TASK 06: lifecycle buttons come from the backend's `viewer.lifecycle`; nothing is guessed from roles. */
+export const lifecycleActions = (viewer: Viewer | undefined): { next: ApiStatus | null; canCancel: boolean } =>
+  viewer?.lifecycle ?? { next: null, canCancel: false };
