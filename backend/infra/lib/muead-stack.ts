@@ -150,6 +150,7 @@ export class MueadStack extends cdk.Stack {
     const fnUsers = mkFn("Users", "users.ts");
     const fnMembers = mkFn("Members", "members.ts");
     const fnApprovals = mkFn("Approvals", "approvals.ts");
+    const fnTasks = mkFn("Tasks", "tasks.ts");
     const fnNotifications = mkFn("Notifications", "notifications.ts");
     const fnNotifier = mkFn("Notifier", "notifier.ts");
 
@@ -194,6 +195,7 @@ export class MueadStack extends cdk.Stack {
     table.grantReadData(fnUsers);
     table.grantReadWriteData(fnMembers);
     table.grantReadWriteData(fnApprovals);
+    table.grantReadWriteData(fnTasks);
     table.grantReadWriteData(fnNotifications); // own notification items only (enforced by key in the handler)
     table.grantReadWriteData(fnNotifier); // reads request/members/profiles, writes notification items
     bucket.grantReadWrite(fnAttachments); // includes KMS use via the bucket key policy grant
@@ -291,6 +293,14 @@ export class MueadStack extends cdk.Stack {
       { method: "GET", path: "requests/{requestId}/members" },
       { method: "POST", path: "requests/{requestId}/members" },
       { method: "DELETE", path: "requests/{requestId}/members/{userId}" },
+      { method: "PATCH", path: "requests/{requestId}/members/{userId}" },
+      { method: "POST", path: "requests/{requestId}/participation" },
+    ]);
+    wire(fnTasks, [
+      { method: "GET", path: "requests/{requestId}/tasks" },
+      { method: "POST", path: "requests/{requestId}/tasks" },
+      { method: "PATCH", path: "requests/{requestId}/tasks/{taskId}" },
+      { method: "DELETE", path: "requests/{requestId}/tasks/{taskId}" },
     ]);
     wire(fnNotifications, [
       { method: "GET", path: "notifications" },

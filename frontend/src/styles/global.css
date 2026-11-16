@@ -274,3 +274,16 @@ td { padding: 12px var(--s-3); border-top: 1px solid var(--c-border); vertical-a
 .stepper .step.current::before { background: var(--c-primary); box-shadow: 0 0 0 3px #efe5fb; }
 .stepper .step.off { opacity: 0.45; }
 .stepper .step.off::before { border-color: currentColor; }
+
+/* TASK 07: tasks and participation (existing tokens only) */
+.task-progress { display: flex; flex-direction: column; gap: 6px; margin: var(--s-3) 0; }
+.task-bar { height: 8px; border-radius: 999px; background: #efe5fb; overflow: hidden; }
+.task-bar span { display: block; height: 100%; background: var(--c-primary); border-radius: 999px; }
+.task-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--s-3); }
+.task-list li { display: flex; justify-content: space-between; align-items: flex-start; gap: var(--s-3); padding: var(--s-3); border-radius: var(--r-md); background: #fff; }
+.task-list li.done strong { text-decoration: line-through; opacity: 0.7; }
+.task-main { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.task-meta { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); }
+.task-actions { display: flex; align-items: center; gap: var(--s-2); flex: none; }
+.task-actions .select { padding: 6px var(--s-2); }
+.part-answer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-3); }

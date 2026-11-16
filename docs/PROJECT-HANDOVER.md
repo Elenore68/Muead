@@ -589,13 +589,25 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 - **Checks run:** backend type check, 90 / 90 tests, `cdk synth`; frontend 53 / 53 tests and build. Still unverified against real AWS (nothing is deployed).
 - **Not done:** editing a request after approval (rescheduling); the Dashboard still groups Readiness and Validation under "In Progress".
 
+### 14.4 TASK 07 as implemented (branch `task-07-participation-and-tasks`)
+- **Participation:** `POST /v1/requests/{id}/participation {response: CONFIRMED|DECLINED, note?}`. Only the signed-in participant, for themselves, while the request is not Completed or Cancelled. Members now carry `participation` (`PENDING` until answered; `null` for owner and approvers). The owner is notified. **Declining keeps the person on the request**; they get no new tasks and can confirm later (the owner decides whether to remove them).
+- **Member details:** `PATCH /v1/requests/{id}/members/{userId} {specialty?, responsibilities?}` by the owner or an admin (`null` clears). Audit only, no notification.
+- **Tasks (one request each, no team-level tasks):** `GET/POST /v1/requests/{id}/tasks`, `PATCH/DELETE /v1/requests/{id}/tasks/{taskId}`. Fields: title, description, assignee, due date, status (`TODO`, `IN_PROGRESS`, `DONE`). Max 100 per request.
+  - Owner or admin create, edit, reassign and delete. The assignee may change only the status of their own task.
+  - The assignee must be an active owner or participant who has not declined (not an approver).
+  - Blocked once the request is Completed or Cancelled. Each write is one transaction with checks that the request is still open and the assignee is still valid.
+  - Notifications: assignee on assignment, owner and task creator on completion, owner on a participation answer.
+- **Frontend:** a Tasks tab (live mode only; mock mode keeps its tabs) with progress bar, overdue marker, create/edit/delete dialogs; confirm/decline buttons and answer badges in the Participants card; edit-details dialog.
+- **Checks run:** backend type check, 112 / 112 tests, `cdk synth` (new Tasks Lambda, 6 new routes); frontend 73 / 73 tests and build. Not run against real AWS.
+- **Not done:** task progress on the Dashboard (needs an aggregate across requests and a decision on "mine" vs "all"); reminders for due tasks (needs EventBridge, TASK 14).
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
 | # | Task | SOW | What's missing | Depends on | Still needs a decision |
 |---|---|---|---|---|---|
 | **06 (A)** | **Request lifecycle and complete request form. DONE locally on branch `task-06-request-lifecycle` (not committed, not pushed).** See section 14.3. | 4.2, 4.4 | — | — | Rules chosen for the open points are listed in 14.3; confirm them with the owner |
-| 07 (B) | Participation and tasks | 4.3, 4.4 | Confirm or decline participation; tasks (owner, deadline, status); task progress on the Dashboard; editing a member's specialty or responsibilities | members (done) | Team-level tasks; what declining means |
+| 07 (B) | Participation and tasks. **DONE locally on branch `task-07-participation-and-tasks`.** See section 14.4. | 4.3, 4.4 | — | — | Rules chosen for the open points are in 14.4; Dashboard task progress is not built |
 | 08 (C) | Readiness checklist | 4.6 | Template and per-request items; participant updates; gate before In Progress | 06 | Template content; who may mark items |
 | 09 (D) | Maintenance execution tracking | 4.7 (heading only) | Progress notes, issues, Activity tab | 06, 07 | **Everything**: the SOW has no criteria |
 | 10 (E) | Validation and final report and closure | 4.9, 4.10 (heading only) | Validation per domain, remaining issues, final report, closing | 06, 09 | Closure rules and report contents |

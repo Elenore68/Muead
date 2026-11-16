@@ -72,6 +72,10 @@ export const toMemberApi = (m: Item) => ({
   status: m.status,
   specialty: m.specialty ?? null,
   responsibilities: m.responsibilities ?? null,
+  // TASK 07: participants answer "confirmed" / "declined"; before that (and for old records) it is PENDING.
+  participation: m.activityRole === "PARTICIPANT" ? m.participation ?? "PENDING" : null,
+  participationAt: m.participationAt ?? null,
+  participationNote: m.participationNote ?? null,
   assignedBy: { id: m.assignedBy, displayName: m.assignedByName, activityRole: m.assignedByRole },
   assignedAt: m.assignedAt,
   removedBy: m.removedBy ? { id: m.removedBy, displayName: m.removedByName, activityRole: m.removedByRole } : null,

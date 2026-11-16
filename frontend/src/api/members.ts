@@ -15,11 +15,17 @@ export interface Member {
   status: "ACTIVE" | "REMOVED";
   specialty: string | null;
   responsibilities: string | null;
+  /** TASK 07. Participants only (null for owner and approvers). */
+  participation?: Participation | null;
+  participationAt?: string | null;
+  participationNote?: string | null;
   assignedBy: { id: string; displayName: string; activityRole: string };
   assignedAt: string;
   removedBy: { id: string; displayName: string; activityRole: string } | null;
   removedAt: string | null;
 }
+
+export type Participation = "PENDING" | "CONFIRMED" | "DECLINED";
 
 export interface MembersResponse {
   items: Member[];
@@ -62,3 +68,15 @@ export const searchUsers = (p: { q: string; approverEligible?: boolean; limit?: 
     query: { q: p.q, approverEligible: p.approverEligible ? "true" : undefined, limit: p.limit },
     signal,
   });
+
+/** TASK 07: the signed-in participant answers for themselves. Declining keeps them on the request. */
+export const MAX_PARTICIPATION_NOTE = 500;
+export const respondToParticipation = (requestId: string, response: "CONFIRMED" | "DECLINED", note?: string) =>
+  api<{ requestId: string; userId: string; participation: Participation; participationAt: string; participationNote: string | null }>(
+    `requests/${enc(requestId)}/participation`,
+    { method: "POST", body: { response, ...(note ? { note } : {}) } },
+  );
+
+/** TASK 07: owner or admin edits specialty / responsibilities. `null` clears a value. */
+export const updateMember = (requestId: string, userId: string, patch: { specialty?: string | null; responsibilities?: string | null }) =>
+  api<Member>(`requests/${enc(requestId)}/members/${enc(userId)}`, { method: "PATCH", body: patch });
