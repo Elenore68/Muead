@@ -9,14 +9,22 @@ import * as lambda from "aws-cdk-lib/aws-lambda";
 import * as nodejs from "aws-cdk-lib/aws-lambda-nodejs";
 import * as logs from "aws-cdk-lib/aws-logs";
 import * as apigw from "aws-cdk-lib/aws-apigateway";
+import * as iam from "aws-cdk-lib/aws-iam";
+import * as eventsources from "aws-cdk-lib/aws-lambda-event-sources";
 import type { EnvConfig } from "../config";
 
 export interface MueadStackProps extends cdk.StackProps {
   cfg: EnvConfig;
 }
 
-/** Cognito groups = platform roles (SOW section 2 and 5.2). */
-const ROLE_GROUPS = ["MaintenanceOwner", "TechnicalParticipant", "Approver", "PlatformAdmin"];
+/**
+ * Organization-level Cognito groups only.
+ *  - PlatformAdmin:    platform administration (unchanged).
+ *  - ApprovalEligible: may be ASSIGNED as an approver; grants no approval authority by itself.
+ * Activity roles (owner / participant / approver) are per request in DynamoDB, not Cognito groups.
+ * The former MaintenanceOwner / TechnicalParticipant / Approver groups were removed before any deployment.
+ */
+const ORG_GROUPS = ["PlatformAdmin", "ApprovalEligible"];
 
 interface RouteDef {
   method: string;
@@ -47,6 +55,9 @@ export class MueadStack extends cdk.Stack {
       encryptionKey: key,
       pointInTimeRecoverySpecification: { pointInTimeRecoveryEnabled: true },
       removalPolicy: cdk.RemovalPolicy.RETAIN,
+      // TASK 05: audit inserts feed the notifier; notifications expire after 180 days via `ttl`.
+      stream: dynamodb.StreamViewType.NEW_IMAGE,
+      timeToLiveAttribute: "ttl",
     });
     for (const n of [1, 2, 3]) {
       table.addGlobalSecondaryIndex({
@@ -93,7 +104,7 @@ export class MueadStack extends cdk.Stack {
       accountRecovery: cognito.AccountRecovery.EMAIL_ONLY,
       removalPolicy: cdk.RemovalPolicy.RETAIN,
     });
-    for (const g of ROLE_GROUPS) {
+    for (const g of ORG_GROUPS) {
       new cognito.CfnUserPoolGroup(this, `Group${g}`, { userPoolId: userPool.userPoolId, groupName: g });
     }
     const userPoolClient = userPool.addClient("WebClient", {
@@ -136,12 +147,55 @@ export class MueadStack extends cdk.Stack {
     const fnAttachments = mkFn("Attachments", "attachments.ts");
     const fnDashboard = mkFn("Dashboard", "dashboard.ts");
     const fnReference = mkFn("Reference", "reference.ts");
+    const fnUsers = mkFn("Users", "users.ts");
+    const fnMembers = mkFn("Members", "members.ts");
+    const fnApprovals = mkFn("Approvals", "approvals.ts");
+    const fnNotifications = mkFn("Notifications", "notifications.ts");
+    const fnNotifier = mkFn("Notifier", "notifier.ts");
+
+    // ---------- Notifications (TASK 05, SOW 4.3 / 4.4 / 5.5) ----------
+    if (cfg.email.enabled && !cfg.email.fromAddress.includes("@")) {
+      throw new Error("config.email.enabled requires config.email.fromAddress (an SES-verified sender)");
+    }
+    fnNotifier.addEnvironment("EMAIL_ENABLED", String(cfg.email.enabled));
+    fnNotifier.addEnvironment("EMAIL_FROM", cfg.email.enabled ? cfg.email.fromAddress : "");
+    fnNotifier.addEnvironment("APP_URL", cfg.allowedOrigins[0]);
+    fnNotifier.addEventSource(
+      new eventsources.DynamoEventSource(table, {
+        startingPosition: lambda.StartingPosition.LATEST,
+        batchSize: 25,
+        retryAttempts: 5,
+        bisectBatchOnError: true,
+        reportBatchItemFailures: true,
+        // Only new audit entries; every other table write is ignored before the function is invoked.
+        filters: [
+          lambda.FilterCriteria.filter({
+            eventName: lambda.FilterRule.isEqual("INSERT"),
+            dynamodb: { NewImage: { entityType: { S: lambda.FilterRule.isEqual("AUDIT") } } },
+          }),
+        ],
+      }),
+    );
+    if (cfg.email.enabled) {
+      // Least privilege: send only as the configured sender identity. Not granted while email is disabled.
+      fnNotifier.addToRolePolicy(
+        new iam.PolicyStatement({
+          actions: ["ses:SendEmail"],
+          resources: [`arn:aws:ses:${this.region}:${this.account}:identity/${cfg.email.fromAddress}`],
+        }),
+      );
+    }
 
     // Least privilege per function.
     table.grantReadWriteData(fnMe);
     table.grantReadWriteData(fnRequests);
     table.grantReadWriteData(fnAttachments);
     table.grantReadData(fnDashboard);
+    table.grantReadData(fnUsers);
+    table.grantReadWriteData(fnMembers);
+    table.grantReadWriteData(fnApprovals);
+    table.grantReadWriteData(fnNotifications); // own notification items only (enforced by key in the handler)
+    table.grantReadWriteData(fnNotifier); // reads request/members/profiles, writes notification items
     bucket.grantReadWrite(fnAttachments); // includes KMS use via the bucket key policy grant
     key.grantEncryptDecrypt(fnAttachments);
 
@@ -230,6 +284,26 @@ export class MueadStack extends cdk.Stack {
       { method: "GET", path: "dashboard/upcoming" },
     ]);
     wire(fnReference, [{ method: "GET", path: "reference-data" }]);
+    wire(fnUsers, [{ method: "GET", path: "users" }]);
+    wire(fnMembers, [
+      { method: "GET", path: "requests/{requestId}/members" },
+      { method: "POST", path: "requests/{requestId}/members" },
+      { method: "DELETE", path: "requests/{requestId}/members/{userId}" },
+    ]);
+    wire(fnNotifications, [
+      { method: "GET", path: "notifications" },
+      { method: "GET", path: "notifications/unread-count" },
+      { method: "POST", path: "notifications/read-all" },
+      { method: "POST", path: "notifications/{notificationId}/read" },
+    ]);
+    wire(fnApprovals, [
+      { method: "POST", path: "requests/{requestId}/submit" },
+      { method: "POST", path: "requests/{requestId}/withdraw" },
+      { method: "POST", path: "requests/{requestId}/approvals/decision" },
+      { method: "GET", path: "requests/{requestId}/approvals" },
+      { method: "GET", path: "approvals" },
+      { method: "GET", path: "approvals/summary" },
+    ]);
 
     // ---------- Outputs (needed by the frontend configuration) ----------
     new cdk.CfnOutput(this, "ApiUrl", { value: api.url });

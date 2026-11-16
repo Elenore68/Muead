@@ -5,6 +5,7 @@ import { Avatar, LogoMark } from "./ui";
 import { team } from "../data/mock";
 import { config } from "../config";
 import { useAuth } from "../auth/AuthContext";
+import NotificationBell from "./NotificationBell";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: Home, end: true },
@@ -73,7 +74,12 @@ export function Topbar({ title, subtitle, crumbs, action }: TopbarProps) {
         {subtitle && <p className="page-sub">{subtitle}</p>}
       </div>
       <div className="top-actions">
-        <button className="bell" aria-label="Notifications"><Bell size={22} /><i /></button>
+        {live ? (
+          <NotificationBell />
+        ) : (
+          // Mock mode: original static bell.
+          <button className="bell" aria-label="Notifications"><Bell size={22} /><i /></button>
+        )}
         {live ? (
           // Real signed-in user from GET /me. Clicking signs out (no user menu is designed yet).
           <button className="user" aria-label={`Signed in as ${profile.displayName}. Sign out`} title="Sign out" onClick={signOut}>

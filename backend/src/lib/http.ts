@@ -79,6 +79,14 @@ export const decodeToken = (token: string | undefined): Record<string, unknown> 
   throw badRequest("Invalid nextToken");
 };
 
+/**
+ * A continuation key must belong to the partition being queried. Otherwise DynamoDB answers with a
+ * ValidationException (a 500). Rejecting it here gives a clean 400 and never queries another partition.
+ */
+export const assertTokenPartition = (key: Record<string, unknown> | undefined, attribute: string, expected: string): void => {
+  if (key && key[attribute] !== expected) throw badRequest("Invalid nextToken");
+};
+
 export const parseLimit = (raw: string | undefined, def = 25, max = 100): number => {
   if (raw === undefined) return def;
   const n = Number(raw);
