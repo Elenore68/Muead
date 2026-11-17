@@ -689,6 +689,11 @@ This **replaces** the earlier rule that the owner chooses approvers (sections 8,
 - **Verified in Chrome on the hosted site:** sign-in, create a request with a PDF attachment (pre-signed S3 upload, so S3 CORS works), submit, the approver's inbox, approve, cancel. No browser errors. Backend 200 / 200 tests.
 - **Not done:** a custom domain, Git-connected automatic builds, a WAF.
 
+### 14.15 Managers in the dev stack (2026-11-17)
+- The only manager (`ApprovalEligible`) is now `approver@muead-test.example` (Demo Approver). `e2e.approver@muead-test.example` was deleted from Cognito (its profile is kept for history, status DISABLED) and `sara.alzannan1@gmail.com` was removed from the group (still `PlatformAdmin`). Their group-mirror items were deleted from the table so they no longer receive requests. Verified: a new submission went to exactly one approver.
+- `backend/scripts/e2e-smoke.mjs` needs an owner and a manager; run it with the Demo accounts (or create new e2e users) because the `e2e.approver` user no longer exists.
+- Removing someone from the group by hand needs both steps (Cognito group and the `USER#<id> / ROLE#ApprovalEligible` item); otherwise the change only reaches the table at that person's next sign-in.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
