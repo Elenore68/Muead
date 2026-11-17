@@ -125,10 +125,16 @@ export default function NewRequest() {
         failures.push(ex instanceof Error ? ex.message : `${file.name}: upload failed.`);
       }
     }
-    nav("/requests", {
+    // Open the new request itself, ready to be submitted. The request list reads an index that can be a moment behind,
+    // so a request that was just created might not be in it yet.
+    nav(`/requests/${created.id}`, {
       state: {
-        created: created.requestNo,
-        warning: failures.length ? `The request was created, but ${failures.length} attachment(s) failed to upload: ${failures.join(" ")}` : undefined,
+        flash: {
+          kind: failures.length ? "error" : "success",
+          text: failures.length
+            ? `${created.requestNo} was created, but ${failures.length} attachment(s) failed to upload: ${failures.join(" ")}`
+            : `${created.requestNo} was created as a draft. Press "Submit for approval" when it is ready.`,
+        },
       },
     });
   };
