@@ -686,3 +686,10 @@ These rules apply to every event:
 - Item: `{ id, group, title, custom, state, note, updatedBy, updatedAt, version }`. Groups: BACKUP, ACCESS, FIREWALL_CONNECTIVITY, TEAM_AVAILABILITY, APP_DEPENDENCIES, DOCUMENTATION.
 - `POST /v1/requests/{requestId}/transition` to READINESS creates the six template items; to IN_PROGRESS returns `409 READINESS_INCOMPLETE` (details list the pending item ids) unless every item is DONE or NOT_APPLICABLE.
 - Audit actions: `READINESS_UPDATED`, `READINESS_ITEM_ADDED`, `READINESS_ITEM_DELETED`.
+
+## 17. TASK 09: activity log (implemented)
+- `GET /v1/requests/{requestId}/activity` -> `{ items: Entry[] (newest first), summary: { notes, issues, openIssues, openHigh }, requestStatus }`. Any member or admin.
+- `POST /v1/requests/{requestId}/activity` body `{ type: "NOTE" | "ISSUE", text (1..2000), severity?: LOW|MEDIUM|HIGH (required for ISSUE, not allowed for NOTE) }` -> `201 Entry`. Owner, admin or participant, only while the request is IN_PROGRESS or VALIDATION (`409 INVALID_STATE`). `409 ENTRY_LIMIT` at 500 entries.
+- `PATCH /v1/requests/{requestId}/activity/{entryId}` body `{ version, state: OPEN | RESOLVED, note? (required for RESOLVED, max 1000) }`. Issues only (`409 NOT_AN_ISSUE`); `409 ALREADY_IN_STATE`, `409 VERSION_CONFLICT`.
+- Entry: `{ id, type, text, severity, state, resolutionNote, resolvedBy, resolvedAt, author, createdAt, version }`.
+- Audit actions: `ACTIVITY_NOTE_ADDED`, `ISSUE_REPORTED`, `ISSUE_RESOLVED`, `ISSUE_REOPENED`.

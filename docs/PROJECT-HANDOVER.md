@@ -610,6 +610,15 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 - **API:** `GET/POST /v1/requests/{id}/readiness`, `PATCH/DELETE /v1/requests/{id}/readiness/{itemId}`. **Frontend:** a Readiness tab (live mode only).
 - **Checks run:** backend type check, 129 / 129 tests, `cdk synth`; frontend 85 / 85 tests and build. Not run against real AWS.
 
+### 14.6 TASK 09 as implemented (branch `task-09-execution-tracking`, stacked on 08)
+SOW 4.7 is only a heading, so these are **decisions to confirm with the owner**:
+- The Activity tab is an append-only log of **progress notes** and **issues** for the request. Entries are never edited or deleted.
+- An issue has a severity (Low, Medium, High) and is Open until someone resolves it with a description. A resolved issue can be reopened.
+- Owner, admin and participants write and resolve; approvers only read. Entries can be added while the request is In Progress or in Validation; everything stays readable afterwards.
+- Notifications: a new issue notifies the owner and participants; a resolution notifies the owner and the person who reported it. Notes notify nobody. The text of an entry is never copied into audit entries or notifications.
+- API: `GET/POST /v1/requests/{id}/activity`, `PATCH /v1/requests/{id}/activity/{entryId}`. Max 500 entries per request.
+- Checks run: backend 142 / 142 tests and `cdk synth`; frontend 94 / 94 tests and build.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -618,7 +627,7 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 | **06 (A)** | **Request lifecycle and complete request form. DONE locally on branch `task-06-request-lifecycle` (not committed, not pushed).** See section 14.3. | 4.2, 4.4 | — | — | Rules chosen for the open points are listed in 14.3; confirm them with the owner |
 | 07 (B) | Participation and tasks. **DONE locally on branch `task-07-participation-and-tasks`.** See section 14.4. | 4.3, 4.4 | — | — | Rules chosen for the open points are in 14.4; Dashboard task progress is not built |
 | 08 (C) | Readiness checklist. **DONE locally on branch `task-08-readiness-checklist`.** See section 14.5. | 4.6 | — | — | Template wording and who may mark items were decided in 14.5; confirm with the owner |
-| 09 (D) | Maintenance execution tracking | 4.7 (heading only) | Progress notes, issues, Activity tab | 06, 07 | **Everything**: the SOW has no criteria |
+| 09 (D) | Maintenance execution tracking. **DONE locally on branch `task-09-execution-tracking` (built on 08).** See section 14.6. | 4.7 (heading only) | — | — | The SOW has no criteria: everything in 14.6 is a decision to confirm with the owner |
 | 10 (E) | Validation and final report and closure | 4.9, 4.10 (heading only) | Validation per domain, remaining issues, final report, closing | 06, 09 | Closure rules and report contents |
 | 11 (F) | AI activity summary | 4.8, 5.7 | Bedrock summary, review before saving, stored in S3, enable the "Generate Summary" button | 07, 09, 10 | Model, language, who the "responsible employee" is |
 | 12 (G) | Scheduling and conflicts | 4.4 | Schedule page, conflict detection, Dashboard alerts; Dashboard "mine" view counts only owned requests | 06 | What counts as a conflict |

@@ -9,13 +9,14 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
-import { useApprovalHistory, useMembers, useReadiness, useTasks } from "../data/useActivity";
+import { useActivityLog, useApprovalHistory, useMembers, useReadiness, useTasks } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
 import LifecycleCard from "../components/LifecycleCard";
 import TasksTab from "../components/TasksTab";
 import ReadinessTab from "../components/ReadinessTab";
+import ActivityTab from "../components/ActivityTab";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
@@ -41,6 +42,7 @@ function RequestDetailsView({ id }: { id: string }) {
   const history = useApprovalHistory(id);
   const tasks = useTasks(id, tab === "Tasks");
   const readiness = useReadiness(id, tab === "Readiness");
+  const activityLog = useActivityLog(id, tab === "Activity");
   const { profile } = useAuth();
   const [flash, setFlash] = useState<Flash>(null);
 
@@ -50,7 +52,8 @@ function RequestDetailsView({ id }: { id: string }) {
     history.refresh();
     tasks.refresh();
     readiness.refresh();
-  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+    activityLog.refresh();
+  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -143,7 +146,17 @@ function RequestDetailsView({ id }: { id: string }) {
         </div>
       )}
       <Tabs items={config.apiEnabled ? LIVE_TABS : TABS} active={tab} onChange={setTab} />
-      {tab === "Readiness" && live ? (
+      {tab === "Activity" && live ? (
+        <ActivityTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          log={activityLog.state}
+          retry={activityLog.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Readiness" && live ? (
         <ReadinessTab
           requestId={live.id}
           status={live.status}

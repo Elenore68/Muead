@@ -100,3 +100,8 @@ export const canUpdateChecklist = (viewer: Viewer | undefined, status: ApiStatus
 
 /** Owner or admin add and delete custom items, only while the request is in Readiness. */
 export const canManageChecklist = (viewer: Viewer | undefined, status: ApiStatus): boolean => status === "READINESS" && !!viewer?.canEdit;
+
+/* ---------- TASK 09: activity log ---------- */
+/** Owner, admin and participants add notes and issues and resolve issues, in the execution stages only. */
+export const canWriteActivity = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
+  (status === "IN_PROGRESS" || status === "VALIDATION") && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");

@@ -151,6 +151,7 @@ export class MueadStack extends cdk.Stack {
     const fnMembers = mkFn("Members", "members.ts");
     const fnApprovals = mkFn("Approvals", "approvals.ts");
     const fnTasks = mkFn("Tasks", "tasks.ts");
+    const fnActivity = mkFn("Activity", "activity.ts");
     const fnReadiness = mkFn("Readiness", "readiness.ts");
     const fnNotifications = mkFn("Notifications", "notifications.ts");
     const fnNotifier = mkFn("Notifier", "notifier.ts");
@@ -197,6 +198,7 @@ export class MueadStack extends cdk.Stack {
     table.grantReadWriteData(fnMembers);
     table.grantReadWriteData(fnApprovals);
     table.grantReadWriteData(fnTasks);
+    table.grantReadWriteData(fnActivity);
     table.grantReadWriteData(fnReadiness);
     table.grantReadWriteData(fnNotifications); // own notification items only (enforced by key in the handler)
     table.grantReadWriteData(fnNotifier); // reads request/members/profiles, writes notification items
@@ -303,6 +305,11 @@ export class MueadStack extends cdk.Stack {
       { method: "POST", path: "requests/{requestId}/readiness" },
       { method: "PATCH", path: "requests/{requestId}/readiness/{itemId}" },
       { method: "DELETE", path: "requests/{requestId}/readiness/{itemId}" },
+    ]);
+    wire(fnActivity, [
+      { method: "GET", path: "requests/{requestId}/activity" },
+      { method: "POST", path: "requests/{requestId}/activity" },
+      { method: "PATCH", path: "requests/{requestId}/activity/{entryId}" },
     ]);
     wire(fnTasks, [
       { method: "GET", path: "requests/{requestId}/tasks" },

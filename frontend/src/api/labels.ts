@@ -106,3 +106,6 @@ export const checklistGroupLabel = (g: string): string =>
     DOCUMENTATION: "Documentation",
   } as Record<string, string>)[g] ?? g;
 export const itemStateLabel = (s: string): string => ({ PENDING: "Pending", DONE: "Done", NOT_APPLICABLE: "Not applicable" } as Record<string, string>)[s] ?? s;
+
+/* ---------- TASK 09: activity log ---------- */
+export const severityLabel = (s: string | null): string => (s ? s[0] + s.slice(1).toLowerCase() : "");
