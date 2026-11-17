@@ -12,9 +12,6 @@ export type Viewer = NonNullable<RequestDetail["viewer"]>;
 const APPROVER_EDITABLE: ApiStatus[] = ["DRAFT", "REJECTED"];
 const MEMBERSHIP_FROZEN: ApiStatus[] = ["PENDING_APPROVAL", "COMPLETED", "CANCELLED"];
 
-/** Owner or platform admin, and approvers may change only in DRAFT / REJECTED. */
-export const canChangeApprovers = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
-  !!viewer?.canManageMembers && APPROVER_EDITABLE.includes(status);
 
 /** Owner or platform admin; participants may change in every state except pending / finished. */
 export const canChangeParticipants = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
@@ -23,11 +20,12 @@ export const canChangeParticipants = (viewer: Viewer | undefined, status: ApiSta
 export const canChangePolicy = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
   !!viewer?.canEdit && APPROVER_EDITABLE.includes(status);
 
+/** The approvers (the managers) of the current round. They are assigned by the system at submit; nobody picks them. */
 export const activeApprovers = (members: Member[]): Member[] =>
   members.filter((m) => m.status === "ACTIVE" && m.activityRole === "APPROVER");
 
-export const canSubmit = (viewer: Viewer | undefined, status: ApiStatus, members: Member[]): boolean =>
-  !!viewer?.canEdit && APPROVER_EDITABLE.includes(status) && activeApprovers(members).length > 0;
+/** Submitting needs no approver to be chosen: the request goes to the managers automatically. */
+export const canSubmit = (viewer: Viewer | undefined, status: ApiStatus): boolean => !!viewer?.canEdit && APPROVER_EDITABLE.includes(status);
 
 export const canWithdraw = (viewer: Viewer | undefined, status: ApiStatus): boolean => !!viewer?.canEdit && status === "PENDING_APPROVAL";
 

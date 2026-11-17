@@ -7,6 +7,7 @@ import {
   decisionRecordUpdate,
   parseDecisionBody,
   parseWithdrawBody,
+  selectManagers,
   validateSubmit,
   validateWithdraw,
 } from "../src/lib/approvals";
@@ -43,51 +44,57 @@ test("access is activity-scoped", () => {
 test("assignment rules", () => {
   const base = (o: Partial<AssignmentInput> = {}): AssignmentInput => ({
     caller: user(OWNER), access: resolveAccess(user(OWNER), m(OWNER, "OWNER")), requestStatus: "DRAFT", ownerId: OWNER,
-    targetUserId: SARA, targetExists: true, targetActive: true, targetEligible: true, existing: undefined, role: "APPROVER",
+    targetUserId: SARA, targetExists: true, targetActive: true, targetEligible: false, existing: undefined, role: "PARTICIPANT",
     activeApprovers: 0, activeMembers: 1, ...o,
   });
   const cases: [string, Partial<AssignmentInput>, string][] = [
-    ["owner assigns eligible approver", {}, "OK"],
-    ["non-manager", { caller: user(SARA), access: resolveAccess(user(SARA), m(SARA, "APPROVER")) }, "FORBIDDEN"],
+    ["owner adds a participant", {}, "OK"],
+    ["approvers cannot be chosen by anyone", { role: "APPROVER", targetEligible: true }, "APPROVERS_AUTOMATIC"],
+    ["not even by a platform admin", { role: "APPROVER", caller: admin, access: resolveAccess(admin, undefined) }, "APPROVERS_AUTOMATIC"],
+    ["non-manager", { caller: user(SARA), access: resolveAccess(user(SARA), m(SARA, "PARTICIPANT")) }, "FORBIDDEN"],
     ["locked while pending", { requestStatus: "PENDING_APPROVAL" }, "LOCKED_WHILE_PENDING"],
-    ["participant locked while pending", { requestStatus: "PENDING_APPROVAL", role: "PARTICIPANT" }, "LOCKED_WHILE_PENDING"],
-    ["approvers locked after approval", { requestStatus: "APPROVED" }, "APPROVERS_LOCKED"],
-    ["participant added after approval", { requestStatus: "IN_PROGRESS", role: "PARTICIPANT" }, "OK"],
-    ["frozen when completed", { requestStatus: "COMPLETED", role: "PARTICIPANT" }, "INVALID_STATE"],
+    ["participant added after approval", { requestStatus: "IN_PROGRESS" }, "OK"],
+    ["frozen when completed", { requestStatus: "COMPLETED" }, "INVALID_STATE"],
     ["unknown user", { targetExists: false }, "USER_NOT_FOUND"],
-    ["participant -> approver", { existing: m(SARA, "PARTICIPANT") }, "ROLE_CONFLICT"],
-    ["owner -> approver", { targetUserId: OWNER, existing: m(OWNER, "OWNER") }, "ROLE_CONFLICT"],
-    ["approver -> participant", { role: "PARTICIPANT", existing: m(SARA, "APPROVER") }, "ROLE_CONFLICT"],
-    ["already assigned", { existing: m(SARA, "APPROVER") }, "ALREADY_ASSIGNED"],
+    ["inactive user", { targetActive: false }, "USER_INACTIVE"],
+    ["owner -> participant", { targetUserId: OWNER, existing: m(OWNER, "OWNER") }, "ROLE_CONFLICT"],
+    ["approver -> participant", { existing: m(SARA, "APPROVER") }, "ROLE_CONFLICT"],
+    ["already assigned", { existing: m(SARA, "PARTICIPANT") }, "ALREADY_ASSIGNED"],
     ["removed can be re-assigned", { existing: m(SARA, "PARTICIPANT", "REMOVED") }, "OK"],
-    ["not eligible", { targetEligible: false }, "NOT_ELIGIBLE"],
-    ["participant needs no eligibility", { role: "PARTICIPANT", targetEligible: false }, "OK"],
-    ["approver cap", { activeApprovers: MAX_APPROVERS }, "APPROVER_LIMIT"],
-    ["member cap", { role: "PARTICIPANT", activeMembers: 50 }, "MEMBER_LIMIT"],
+    ["participant needs no eligibility", { targetEligible: false }, "OK"],
+    ["member cap", { activeMembers: 50 }, "MEMBER_LIMIT"],
     ["admin manages others' request", { caller: admin, access: resolveAccess(admin, undefined) }, "OK"],
-    ["admin cannot self-assign", { caller: admin, access: resolveAccess(admin, undefined), targetUserId: ADMIN }, "SELF_ASSIGNMENT_FORBIDDEN"],
-    ["admin assigned by owner", { targetUserId: ADMIN }, "OK"],
   ];
   for (const [name, o, expected] of cases) assert.equal(code(() => validateAssignment(base(o))), expected, name);
 });
-
 test("removal rules", () => {
   const own = resolveAccess(user(OWNER), m(OWNER, "OWNER"));
   assert.equal(code(() => validateRemoval({ access: own, requestStatus: "DRAFT", member: m(OWNER, "OWNER") })), "CANNOT_REMOVE_OWNER");
-  assert.equal(code(() => validateRemoval({ access: own, requestStatus: "PENDING_APPROVAL", member: m(SARA, "APPROVER") })), "LOCKED_WHILE_PENDING");
-  assert.equal(code(() => validateRemoval({ access: own, requestStatus: "REJECTED", member: m(SARA, "APPROVER") })), "OK");
+  assert.equal(code(() => validateRemoval({ access: own, requestStatus: "DRAFT", member: m(SARA, "APPROVER") })), "APPROVERS_AUTOMATIC", "managers are not removed by hand");
+  assert.equal(code(() => validateRemoval({ access: own, requestStatus: "PENDING_APPROVAL", member: m(SARA, "PARTICIPANT") })), "LOCKED_WHILE_PENDING");
+  assert.equal(code(() => validateRemoval({ access: own, requestStatus: "REJECTED", member: m(SARA, "PARTICIPANT") })), "OK");
 });
-
 test("submit rules", () => {
   const req = (o = {}) => ({ id: "R", ownerId: OWNER, status: "DRAFT", approvalRound: 0, version: 1, ...o });
-  const ap = (id: string, o = {}) => ({ member: m(id, "APPROVER"), profileActive: true, eligible: true, ...o });
-  assert.equal(code(() => validateSubmit({ canEdit: true, request: req(), approvers: [ap(SARA)] })), "OK");
+  const mgr = (id: string) => ({ userId: id, displayName: id, initials: "XX", active: true });
+  assert.equal(code(() => validateSubmit({ canEdit: true, request: req(), approvers: [mgr(SARA)] })), "OK");
+  assert.equal(code(() => validateSubmit({ canEdit: true, request: req({ status: "REJECTED" }), approvers: [mgr(SARA)] })), "OK");
   assert.equal(code(() => validateSubmit({ canEdit: true, request: req(), approvers: [] })), "NO_APPROVERS");
-  assert.equal(code(() => validateSubmit({ canEdit: true, request: req(), approvers: [ap(SARA, { eligible: false })] })), "APPROVER_INVALID");
-  assert.equal(code(() => validateSubmit({ canEdit: true, request: req({ status: "PENDING_APPROVAL" }), approvers: [ap(SARA)] })), "INVALID_STATE");
-  assert.equal(code(() => validateSubmit({ canEdit: false, request: req(), approvers: [ap(SARA)] })), "FORBIDDEN");
+  assert.equal(code(() => validateSubmit({ canEdit: true, request: req({ status: "PENDING_APPROVAL" }), approvers: [mgr(SARA)] })), "INVALID_STATE");
+  assert.equal(code(() => validateSubmit({ canEdit: false, request: req(), approvers: [mgr(SARA)] })), "FORBIDDEN");
+  assert.equal(code(() => validateSubmit({ canEdit: true, request: req(), approvers: Array.from({ length: MAX_APPROVERS + 1 }, (_, i) => mgr(`m${i}`)) })), "APPROVER_LIMIT");
 });
-
+test("managers are picked automatically", () => {
+  const c = (userId: string, displayName: string, active = true) => ({ userId, displayName, initials: "XX", active });
+  const pick = (o: Partial<Parameters<typeof selectManagers>[0]> = {}) =>
+    selectManagers({ candidates: [c(SARA, "Sara"), c(OWNER, "Owner"), c(ADMIN, "Admin"), c("z", "Zed"), c("i", "Inactive", false)], ownerId: OWNER, callerId: "caller", members: [], ...o }).map((x) => x.userId);
+  assert.deepEqual(pick(), [ADMIN, SARA, "z"], "everyone except the owner and inactive people, sorted by name");
+  assert.deepEqual(pick({ callerId: ADMIN }), [SARA, "z"], "the person submitting never becomes their own approver");
+  assert.deepEqual(pick({ members: [m(SARA, "PARTICIPANT")] }), [ADMIN, "z"], "a participant keeps their role (one role per person)");
+  assert.deepEqual(pick({ members: [m(SARA, "PARTICIPANT", "REMOVED")] }), [ADMIN, SARA, "z"], "a removed participant can approve");
+  assert.deepEqual(pick({ members: [m(SARA, "APPROVER")] }), [ADMIN, SARA, "z"], "last round's approvers are re-picked");
+  assert.deepEqual(pick({ candidates: [] }), []);
+});
 test("decision authorization has no admin bypass", () => {
   const pend = { id: "R", ownerId: OWNER, status: "PENDING_APPROVAL", approvalRound: 1 };
   const rec = (id: string, decision = "PENDING") => ({ approverId: id, decision, round: 1 });

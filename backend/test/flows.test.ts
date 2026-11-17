@@ -63,7 +63,8 @@ const txItem = (tx: any[], sk: string, pk = `REQ#${RID}`) =>
 
 const consistentReads = () =>
   db.sent
-    .filter((s) => s.name === "GetCommand" || s.name === "QueryCommand")
+    // Index queries (the manager list, GSI2) cannot be strongly consistent in DynamoDB; table reads can and must be.
+    .filter((s) => (s.name === "GetCommand" || s.name === "QueryCommand") && !s.input.IndexName)
     .map((s) => ({ key: s.input.Key ? `${s.input.Key.PK}|${s.input.Key.SK}` : s.input.ExpressionAttributeValues?.[":s"] ?? s.input.ExpressionAttributeValues?.[":m"], consistent: s.input.ConsistentRead === true }));
 
 /* ------------------------------------------------------------------ decide */
@@ -345,78 +346,156 @@ describe("POST /requests/{id}/withdraw", () => {
 
 /* ------------------------------------------------------------------ submit */
 describe("POST /requests/{id}/submit", () => {
-  const submit = (sub: string, body: unknown) =>
-    approvals(event({ method: "POST", resource: "/requests/{requestId}/submit", sub, body, path: { requestId: RID } })).then(parse);
+  const submit = (sub: string, body: unknown, groups = "") =>
+    approvals(event({ method: "POST", resource: "/requests/{requestId}/submit", sub, groups, body, path: { requestId: RID } })).then(parse);
 
-  test("snapshots approvers into a new round with consistent reads and membersRev condition", async () => {
+  const mgr = (id: string, name = id.slice(-4)) => seedProfile(id, true, name);
+  const txOps = (tx: any[]) => tx.map((t) => Object.values(t)[0] as any);
+  const memberPuts = (tx: any[]) => txOps(tx).filter((o) => String(o.Item?.SK).startsWith("MEMBER#"));
+
+  test("the request goes to the managers automatically: round, records and APPROVER members in ONE transaction", async () => {
+    seedRequest({ version: 3, membersRev: 2 });
+    seedMember(OWNER, "OWNER");
+    mgr(SARA, "Sara");
+    mgr(OTHER, "Omar");
+    const res = await submit(OWNER, { version: 3 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.deepEqual([res.body.approvalRound, res.body.approvers], [1, 2]);
+    const [tx] = db.transactions();
+    const req = txItem(tx, "META");
+    assert.equal(req.Item.status, "PENDING_APPROVAL");
+    assert.equal(req.Item.membersRev, 3, "the member list changed, so the revision moves");
+    assert.match(req.ConditionExpression, /membersRev = :mr/);
+    for (const id of [SARA, OTHER]) {
+      assert.equal(txItem(tx, `APPR#0001#${id}`).Item.decision, "PENDING");
+      assert.equal(txItem(tx, `APPR#0001#${id}`).Item.GSI3PK, `APPROVER#${id}`);
+      const member = txItem(tx, `MEMBER#${id}`);
+      assert.deepEqual([member.Item.activityRole, member.Item.status, member.Item.assignedByRole, member.Item.GSI1PK], ["APPROVER", "ACTIVE", "SYSTEM", `MEMBER#${id}`]);
+      assert.match(member.ConditionExpression, /attribute_not_exists\(PK\) OR #st = :removed/);
+    }
+    const audit = txOps(tx).find((o) => String(o.Item?.SK).startsWith("AUDIT#")).Item;
+    assert.deepEqual([audit.action, audit.autoAssigned, audit.added.sort(), audit.approvers.length], ["SUBMITTED_FOR_APPROVAL", true, [OTHER, SARA].sort(), 2]);
+    assert.ok(txItem(tx, "APPRROUND#0001"));
+    for (const r of consistentReads()) assert.equal(r.consistent, true, `read ${r.key} must be consistent`);
+  });
+
+  test("the owner, the person submitting and people with another role are skipped", async () => {
+    seedRequest();
+    seedMember(OWNER, "OWNER");
+    seedMember(PART, "PARTICIPANT");
+    mgr(OWNER, "Owner");
+    mgr(PART, "Participant");
+    mgr(ADMIN, "Admin");
+    mgr(SARA, "Sara");
+    const res = await submit(ADMIN, { version: 1 }, "PlatformAdmin,ApprovalEligible");
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    const [tx] = db.transactions();
+    assert.deepEqual(memberPuts(tx).map((o) => o.Item.userId), [SARA], "only Sara: the owner, the admin who submits and the participant are skipped");
+    assert.equal(txItem(tx, `APPR#0001#${OWNER}`), undefined);
+  });
+
+  test("inactive managers are skipped; with nobody left the answer is 409 NO_APPROVERS and nothing is written", async () => {
+    seedRequest();
+    seedMember(OWNER, "OWNER");
+    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "NO_APPROVERS");
+    seedProfile(SARA, true);
+    db.put({ ...db.get(`USER#${SARA}`, "PROFILE")!, status: "DISABLED" });
+    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "NO_APPROVERS");
+    assert.equal(db.transactions().length, 0);
+  });
+
+  test("a new round re-picks the managers: kept ones stay, new ones are added, ex-managers are removed", async () => {
     seedRequest({ status: "REJECTED", approvalRound: 1, version: 6, membersRev: 5, approvalDecidedAt: "2026-11-11T05:00:00.000Z" });
     seedMember(OWNER, "OWNER");
     seedMember(SARA, "APPROVER");
-    seedProfile(SARA, true);
+    seedMember(OTHER, "APPROVER"); // no longer a manager
+    mgr(SARA, "Sara");
+    mgr(PART, "Newcomer");
     const res = await submit(OWNER, { version: 6 });
     assert.equal(res.status, 200, JSON.stringify(res.body));
     assert.equal(res.body.approvalRound, 2);
     const [tx] = db.transactions();
-    const req = txItem(tx, "META");
-    assert.equal(req.Item.status, "PENDING_APPROVAL");
-    assert.equal("approvalDecidedAt" in req.Item, false, "previous round outcome cleared");
-    assert.match(req.ConditionExpression, /membersRev = :mr/);
-    assert.equal(req.ExpressionAttributeValues[":mr"], 5);
-    const rec = txItem(tx, `APPR#0002#${SARA}`);
-    assert.equal(rec.Item.decision, "PENDING");
-    assert.equal(rec.Item.GSI3PK, `APPROVER#${SARA}`);
-    assert.ok(txItem(tx, "APPRROUND#0002"));
-    for (const r of consistentReads()) assert.equal(r.consistent, true, `read ${r.key} must be consistent`);
+    const o = txOps(tx);
+    assert.equal("approvalDecidedAt" in txItem(tx, "META").Item, false, "previous round outcome cleared");
+    assert.deepEqual(memberPuts(tx).map((x) => x.Item.userId), [PART], "only the newcomer is added; Sara is already an approver");
+    const removal = o.find((x) => x.Key?.SK === `MEMBER#${OTHER}`);
+    assert.match(removal.UpdateExpression, /REMOVE GSI1PK, GSI1SK/);
+    assert.equal(removal.ExpressionAttributeValues[":byRole"], "SYSTEM");
+    assert.ok(txItem(tx, `APPR#0002#${SARA}`) && txItem(tx, `APPR#0002#${PART}`));
+    assert.equal(txItem(tx, `APPR#0002#${OTHER}`), undefined);
+    const audit = o.find((x) => String(x.Item?.SK).startsWith("AUDIT#")).Item;
+    assert.deepEqual([audit.added, audit.removed], [[PART], [OTHER]]);
   });
 
-  test("TASK 06: a request without the SOW fields cannot be submitted", async () => {
-    seedRequest({ environment: undefined, scheduleStart: undefined });
+  test("only the owner (or an admin) can submit; the SOW fields are still required", async () => {
+    seedRequest();
     seedMember(OWNER, "OWNER");
-    seedMember(SARA, "APPROVER");
-    seedProfile(SARA, true);
+    seedMember(PART, "PARTICIPANT");
+    mgr(SARA);
+    assert.equal((await submit(PART, { version: 1 })).status, 403);
+    seedRequest({ environment: undefined, scheduleStart: undefined });
     const res = await submit(OWNER, { version: 1 });
-    assert.equal(res.status, 400);
-    assert.equal(res.body.error.code, "REQUEST_INCOMPLETE");
+    assert.deepEqual([res.status, res.body.error.code], [400, "REQUEST_INCOMPLETE"]);
     assert.deepEqual(res.body.error.details.map((d: any) => d.field), ["environment", "schedule.start"]);
     assert.equal(db.transactions().length, 0);
   });
-  test("no approvers -> 400; ineligible approver -> 409", async () => {
+
+  test("a concurrent member change fails the transaction with 409", async () => {
     seedRequest();
     seedMember(OWNER, "OWNER");
-    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "NO_APPROVERS");
-    seedMember(SARA, "APPROVER");
-    seedProfile(SARA, false);
-    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "APPROVER_INVALID");
+    mgr(SARA);
+    db.failNextTransactions = 1;
+    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "CONCURRENT_UPDATE");
+  });
+
+  test("the transaction stays under the DynamoDB limit with the maximum number of managers", async () => {
+    seedRequest();
+    seedMember(OWNER, "OWNER");
+    for (let i = 0; i < 30; i++) mgr(U(100 + i), `M${String(i).padStart(2, "0")}`);
+    const res = await submit(OWNER, { version: 1 });
+    assert.equal(res.status, 200, JSON.stringify(res.body));
+    assert.ok(db.transactions()[0].length <= 100, `items: ${db.transactions()[0].length}`);
+    seedRequest();
+    mgr(U(200), "One too many");
+    assert.equal((await submit(OWNER, { version: 1 })).body.error.code, "APPROVER_LIMIT");
   });
 });
-
 /* ------------------------------------------------------------------ members */
 describe("members", () => {
   const add = (sub: string, body: unknown, groups = "") =>
     members(event({ method: "POST", resource: "/requests/{requestId}/members", sub, groups, body, path: { requestId: RID } })).then(parse);
 
-  test("owner assigns an eligible approver", async () => {
+  test("approvers cannot be chosen: 409 APPROVERS_AUTOMATIC for the owner and for an admin", async () => {
     seedRequest();
     seedMember(OWNER, "OWNER");
     seedProfile(SARA, true);
-    const res = await add(OWNER, { userId: SARA, activityRole: "APPROVER" });
-    assert.equal(res.status, 201, JSON.stringify(res.body));
-    const [tx] = db.transactions();
-    assert.equal(txItem(tx, `MEMBER#${SARA}`).Item.GSI1PK, `MEMBER#${SARA}`);
-    assert.match(txItem(tx, "META").UpdateExpression, /membersRev/);
+    for (const [sub, groups] of [[OWNER, ""], [ADMIN, "PlatformAdmin"]] as const) {
+      const res = await add(sub, { userId: SARA, activityRole: "APPROVER" }, groups);
+      assert.deepEqual([res.status, res.body.error.code], [409, "APPROVERS_AUTOMATIC"], sub);
+    }
+    assert.equal(db.transactions().length, 0);
   });
-
-  test("admin cannot assign themselves; owner cannot add participant as approver", async () => {
+  test("an approver cannot be removed by hand either", async () => {
     seedRequest();
     seedMember(OWNER, "OWNER");
-    seedProfile(ADMIN, true);
+    seedMember(SARA, "APPROVER");
+    const res = parse(await members(event({ method: "DELETE", resource: "/requests/{requestId}/members/{userId}", sub: OWNER, path: { requestId: RID, userId: SARA } })));
+    assert.deepEqual([res.status, res.body.error.code], [409, "APPROVERS_AUTOMATIC"]);
+    assert.equal(db.transactions().length, 0);
+  });
+  test("participants are still added by the owner, and cannot be a person who already approves", async () => {
+    seedRequest();
+    seedMember(OWNER, "OWNER");
+    seedProfile(SARA, false);
+    const res = await add(OWNER, { userId: SARA, activityRole: "PARTICIPANT" });
+    assert.equal(res.status, 201, JSON.stringify(res.body));
+    assert.equal(txItem(db.transactions()[0], `MEMBER#${SARA}`).Item.GSI1PK, `MEMBER#${SARA}`);
+    assert.match(txItem(db.transactions()[0], "META").UpdateExpression, /membersRev/);
     seedProfile(PART, true);
-    seedMember(PART, "PARTICIPANT");
-    assert.equal((await add(ADMIN, { userId: ADMIN, activityRole: "APPROVER" }, "PlatformAdmin,ApprovalEligible")).body.error.code, "SELF_ASSIGNMENT_FORBIDDEN");
-    assert.equal((await add(OWNER, { userId: PART, activityRole: "APPROVER" })).body.error.code, "ROLE_CONFLICT");
+    seedMember(PART, "APPROVER");
+    assert.equal((await add(OWNER, { userId: PART, activityRole: "PARTICIPANT" })).body.error.code, "ROLE_CONFLICT");
   });
 });
-
 /* ------------------------------------------------------------------ attachments lock */
 describe("attachments are locked during approval", () => {
   test("upload and delete -> 409 ATTACHMENTS_LOCKED while pending", async () => {

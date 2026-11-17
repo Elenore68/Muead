@@ -22,7 +22,7 @@ Create `frontend/.env.local` (git-ignored) from `frontend/.env.example` with `VI
 CORS allows only `http://localhost:8002` until a hosting domain is added to `allowedOrigins` in `config.ts`.
 
 ## 3. Create test users (there is no self sign-up)
-For each person (replace the values; pick a strong temporary password and share it privately, never in Git):
+For each person (replace the values; pick a strong temporary password and share it privately, never in Git). **Managers** are the people in the `ApprovalEligible` group: every submitted request goes to all of them automatically (except its owner), after they have signed in once.
 ```
 aws cognito-idp admin-create-user --user-pool-id <UserPoolId> --username <email> \
   --user-attributes Name=email,Value=<email> Name=email_verified,Value=true Name=name,Value="<Full name>" \
@@ -33,7 +33,7 @@ aws cognito-idp admin-add-user-to-group --user-pool-id <UserPoolId> --username <
 The first sign-in asks for a new password. People appear in the directory after their first sign-in.
 
 ## 4. Smoke test with two users (owner + approver)
-1. Owner: create a request (all SOW fields), add the approver, submit.
+1. Owner: create a request (all SOW fields) and submit it. It goes to the managers automatically; the approver must have signed in once and must not be the owner.
 2. Approver: approve. Owner: Mark as scheduled, Start readiness, tick every checklist item, Start maintenance.
 3. Add a note and an issue (Activity), Start validation, record the four results, complete with a closing summary.
 4. Open the Report tab; check the bell notifications on both accounts and the Schedule page.

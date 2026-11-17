@@ -75,20 +75,29 @@ try {
     return b;
   };
 
-  await step("directory finds the approver (no email in the answer)", async () => {
+  await step("directory finds the manager (no email in the answer)", async () => {
     const b = expect(await call(owner, "GET", `users?q=${encodeURIComponent("E2E App")}&approverEligible=true`), 200);
-    if (!b.items.some((u) => u.id === meA.id)) throw new Error("approver not found");
+    if (!b.items.some((u) => u.id === meA.id)) throw new Error("manager not found");
     if (JSON.stringify(b).includes("@")) throw new Error("an email address was returned");
   });
-  await step("owner adds the approver", async () => expect(await call(owner, "POST", `requests/${id}/members`, { userId: meA.id, activityRole: "APPROVER" }), 201));
+  await step("approvers cannot be chosen by hand (409 APPROVERS_AUTOMATIC)", async () => {
+    const r = await call(owner, "POST", `requests/${id}/members`, { userId: meA.id, activityRole: "APPROVER" });
+    if (r.status !== 409 || r.body?.error?.code !== "APPROVERS_AUTOMATIC") throw new Error(`got ${r.status} ${JSON.stringify(r.body).slice(0, 200)}`);
+  });
   await step("owner cannot approve their own request (no approver role)", async () => {
     const r = await call(owner, "POST", `requests/${id}/approvals/decision`, { decision: "APPROVED" });
     if (![403, 404, 409].includes(r.status)) throw new Error(`got ${r.status}`);
   });
-  await step("submit for approval", async () => {
+  await step("submit sends it to the managers automatically (no approver was chosen)", async () => {
     const cur = expect(await call(owner, "GET", `requests/${id}`), 200);
     const b = expect(await call(owner, "POST", `requests/${id}/submit`, { version: cur.version }), 200);
     version = b.version;
+    if (b.approvers < 1) throw new Error(`approvers: ${b.approvers}`);
+    const m = expect(await call(owner, "GET", `requests/${id}/members`), 200);
+    const approvers = m.items.filter((x) => x.activityRole === "APPROVER" && x.status === "ACTIVE");
+    if (!approvers.some((x) => x.userId === meA.id)) throw new Error("the manager is not an approver of the request");
+    if (approvers.some((x) => x.userId === me.id)) throw new Error("the owner became an approver");
+    if (approvers.length !== b.approvers) throw new Error(`${approvers.length} approver members but ${b.approvers} records`);
   });
   await step("approver sees it in the inbox and gets the notification", async () => {
     const inbox = expect(await call(appr, "GET", "approvals"), 200);
