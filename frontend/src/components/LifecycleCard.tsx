@@ -2,10 +2,12 @@ import { useState } from "react";
 import { Ban, Pencil, PlayCircle } from "lucide-react";
 import { ApiClientError } from "../api/client";
 import { advanceLabel, LIFECYCLE_STEPS, stageLabel } from "../api/labels";
+import { MAX_REMAINING, MAX_SUMMARY } from "../api/validation";
 import { cancelRequest, MAX_CANCEL_REASON, transitionRequest, type ApiStatus } from "../api/requests";
 import { canEditRequest, lifecycleActions, type Viewer } from "../data/permissions";
 import EditRequestDialog from "./EditRequestDialog";
 import type { RequestFormValues } from "./RequestFields";
+import Modal from "./Modal";
 import TextActionDialog from "./TextActionDialog";
 
 interface Props {
@@ -27,6 +29,7 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
   const [busy, setBusy] = useState(false);
   const [cancelling, setCancelling] = useState(false);
   const [editing, setEditing] = useState(false);
+  const [closing, setClosing] = useState(false);
   const { next, canCancel } = lifecycleActions(viewer);
   const editable = canEditRequest(viewer, status);
 
@@ -67,7 +70,7 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
       {(next || editable || canCancel) && (
         <div className="side-actions">
           {next && (
-            <button type="button" className="btn btn-primary" onClick={advance} disabled={busy}>
+            <button type="button" className="btn btn-primary" onClick={next === "COMPLETED" ? () => setClosing(true) : advance} disabled={busy}>
               <PlayCircle size={16} />{busy ? "Updating…" : advanceLabel(next)}
             </button>
           )}
@@ -97,6 +100,22 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
           }}
         />
       )}
+      {closing && (
+        <CloseDialog
+          onClose={() => setClosing(false)}
+          onSubmit={async (summary, remainingIssues) => {
+            try {
+              await transitionRequest(requestId, "COMPLETED", version, { summary, remainingIssues });
+            } catch (e) {
+              if (e instanceof ApiClientError && e.status === 409) onChanged();
+              throw e;
+            }
+            setClosing(false);
+            notify("success", "The request is completed and the final report was created.");
+            onChanged();
+          }}
+        />
+      )}
       {cancelling && (
         <TextActionDialog
           title="Cancel request"
@@ -117,5 +136,43 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
         />
       )}
     </div>
+  );
+}
+
+function CloseDialog({ onSubmit, onClose }: { onSubmit: (summary: string, remainingIssues?: string) => Promise<void>; onClose: () => void }) {
+  const [summary, setSummary] = useState("");
+  const [remaining, setRemaining] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  return (
+    <Modal title="Complete and close request" onClose={onClose} busy={busy}>
+      <form
+        noValidate
+        aria-busy={busy}
+        onSubmit={async (e) => {
+          e.preventDefault();
+          if (!summary.trim()) return setError("Write a closing summary.");
+          setBusy(true);
+          setError("");
+          try {
+            await onSubmit(summary.trim(), remaining.trim() || undefined);
+          } catch (ex) {
+            setError(ex instanceof Error ? ex.message : "The request could not be completed.");
+            setBusy(false);
+          }
+        }}
+      >
+        <p className="page-sub" style={{ marginBottom: 12 }}>Every validation check needs a result. The final report is created from this summary and everything recorded on the request, and cannot be changed afterwards.</p>
+        <div className="field"><label htmlFor="close-summary">Closing summary <span className="req">*</span></label>
+          <textarea id="close-summary" className="textarea" value={summary} maxLength={MAX_SUMMARY} disabled={busy} onChange={(e) => setSummary(e.target.value)} /></div>
+        <div className="field"><label htmlFor="close-remaining">Remaining issues</label>
+          <textarea id="close-remaining" className="textarea" value={remaining} maxLength={MAX_REMAINING} disabled={busy} placeholder="Required if a validation check failed or an issue is still open" onChange={(e) => setRemaining(e.target.value)} /></div>
+        {error && <p role="alert" className="notice error">{error}</p>}
+        <div className="form-actions">
+          <button type="button" className="btn btn-outline" onClick={onClose} disabled={busy}>Cancel</button>
+          <button type="submit" className="btn btn-primary" disabled={busy}>{busy ? "Completing…" : "Complete request"}</button>
+        </div>
+      </form>
+    </Modal>
   );
 }

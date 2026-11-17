@@ -693,3 +693,10 @@ These rules apply to every event:
 - `PATCH /v1/requests/{requestId}/activity/{entryId}` body `{ version, state: OPEN | RESOLVED, note? (required for RESOLVED, max 1000) }`. Issues only (`409 NOT_AN_ISSUE`); `409 ALREADY_IN_STATE`, `409 VERSION_CONFLICT`.
 - Entry: `{ id, type, text, severity, state, resolutionNote, resolvedBy, resolvedAt, author, createdAt, version }`.
 - Audit actions: `ACTIVITY_NOTE_ADDED`, `ISSUE_REPORTED`, `ISSUE_RESOLVED`, `ISSUE_REOPENED`.
+
+## 18. TASK 10: validation, closing and final report (implemented)
+- `GET /v1/requests/{requestId}/validation` -> `{ items: [{ domain, title, result, note, updatedBy, updatedAt, version }], progress: { total, resolved, passed, failed, percent }, requestStatus, started }`. Domains: APPLICATION, DATABASE, OS, INFRASTRUCTURE.
+- `PATCH /v1/requests/{requestId}/validation/{domain}` body `{ version, result: PENDING|PASSED|FAILED|NOT_APPLICABLE, note? (max 1000; required for FAILED and NOT_APPLICABLE) }`. Owner, admin or participant, only while the request is VALIDATION. The last open result also writes a `VALIDATION_COMPLETED` audit entry.
+- `POST /v1/requests/{requestId}/transition` to VALIDATION creates the four checks. To COMPLETED the body is `{ to: "COMPLETED", version, summary (1..5000), remainingIssues? (max 2000) }`. Errors: `409 VALIDATION_INCOMPLETE` (details list pending domains), `400` when `summary` is missing or when `remainingIssues` is missing although a check failed or an issue is open.
+- `GET /v1/requests/{requestId}/report` -> the stored final report (any member or admin); `404` until the request is COMPLETED.
+- Audit actions: `VALIDATION_UPDATED`, `VALIDATION_COMPLETED`; closing is the usual `REQUEST_STATUS_CHANGED` with `finalReport: true`.

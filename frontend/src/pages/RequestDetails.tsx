@@ -9,7 +9,7 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
-import { useActivityLog, useApprovalHistory, useMembers, useReadiness, useTasks } from "../data/useActivity";
+import { useActivityLog, useApprovalHistory, useMembers, useReadiness, useReport, useTasks, useValidation } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
@@ -17,11 +17,13 @@ import LifecycleCard from "../components/LifecycleCard";
 import TasksTab from "../components/TasksTab";
 import ReadinessTab from "../components/ReadinessTab";
 import ActivityTab from "../components/ActivityTab";
+import ValidationTab from "../components/ValidationTab";
+import ReportTab from "../components/ReportTab";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
 // TASK 07: the Tasks tab exists only in live mode, so mock mode keeps the original tabs.
-const LIVE_TABS = ["Details", "Tasks", "Readiness", "Activity", "Approvals", "Attachments"];
+const LIVE_TABS = ["Details", "Tasks", "Readiness", "Activity", "Validation", "Report", "Approvals", "Attachments"];
 
 export default function RequestDetails() {
   const { id = "" } = useParams();
@@ -43,6 +45,8 @@ function RequestDetailsView({ id }: { id: string }) {
   const tasks = useTasks(id, tab === "Tasks");
   const readiness = useReadiness(id, tab === "Readiness");
   const activityLog = useActivityLog(id, tab === "Activity");
+  const validation = useValidation(id, tab === "Validation");
+  const report = useReport(id, tab === "Report" && state.kind === "ready" && state.data.live?.status === "COMPLETED");
   const { profile } = useAuth();
   const [flash, setFlash] = useState<Flash>(null);
 
@@ -53,7 +57,9 @@ function RequestDetailsView({ id }: { id: string }) {
     tasks.refresh();
     readiness.refresh();
     activityLog.refresh();
-  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+    validation.refresh();
+    report.refresh();
+  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh, validation.refresh, report.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -146,7 +152,19 @@ function RequestDetailsView({ id }: { id: string }) {
         </div>
       )}
       <Tabs items={config.apiEnabled ? LIVE_TABS : TABS} active={tab} onChange={setTab} />
-      {tab === "Activity" && live ? (
+      {tab === "Validation" && live ? (
+        <ValidationTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          validation={validation.state}
+          retry={validation.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Report" && live ? (
+        <ReportTab status={live.status} report={report.state} retry={report.retry} />
+      ) : tab === "Activity" && live ? (
         <ActivityTab
           requestId={live.id}
           status={live.status}

@@ -98,7 +98,7 @@ describe("POST /requests/{id}/transition", () => {
     seedMember(OWNER, "OWNER");
     let version = 7;
     for (const to of steps) {
-      const res = await move(OWNER, { to, version });
+      const res = await requests(event({ method: "POST", resource: "/requests/{requestId}/transition", sub: OWNER, body: { to, version, summary: "All good" }, path: { requestId: RID } })).then(parse);
       assert.equal(res.status, 200, `${to}: ${JSON.stringify(res.body)}`);
       version = res.body.version;
       // The fake does not apply transactions: re-seed the request as the transaction wrote it.
@@ -109,6 +109,7 @@ describe("POST /requests/{id}/transition", () => {
       for (const t of tx) {
         const it = (t as any).Put?.Item;
         if (it?.SK?.startsWith("READY#")) db.put({ ...it, state: "DONE" });
+        if (it?.SK?.startsWith("VALID#")) db.put({ ...it, result: "PASSED" });
       }
     }
     const final = db.get(`REQ#${RID}`, "META")!;

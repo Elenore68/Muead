@@ -105,3 +105,8 @@ export const canManageChecklist = (viewer: Viewer | undefined, status: ApiStatus
 /** Owner, admin and participants add notes and issues and resolve issues, in the execution stages only. */
 export const canWriteActivity = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
   (status === "IN_PROGRESS" || status === "VALIDATION") && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");
+
+/* ---------- TASK 10: validation and closing ---------- */
+/** Owner, admin and participants record results, only while the request is in Validation. */
+export const canRecordValidation = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
+  status === "VALIDATION" && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");

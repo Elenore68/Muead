@@ -619,6 +619,16 @@ SOW 4.7 is only a heading, so these are **decisions to confirm with the owner**:
 - API: `GET/POST /v1/requests/{id}/activity`, `PATCH /v1/requests/{id}/activity/{entryId}`. Max 500 entries per request.
 - Checks run: backend 142 / 142 tests and `cdk synth`; frontend 94 / 94 tests and build.
 
+### 14.7 TASK 10 as implemented (branch `task-10-validation-and-final-report`, stacked on 09)
+SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are **decisions to confirm with the owner**:
+- **Validation:** four checks (Application, Database, Operating system, Infrastructure), created in the same transaction that moves the request to Validation. Each ends as Passed, Failed (note required) or Not applicable (reason required). Owner, admin and participants record results, only while the request is in Validation; approvers read.
+- **Closing (Validation → Completed):** every check needs a result and a closing summary (max 5000). If a check failed or an issue is still open, the "remaining issues" text is also required. The transaction re-checks every result, so a concurrent change cannot slip through. Owner or admin only.
+- **Final report:** written once in the same transaction (`REPORT#FINAL`, never changed). It is a snapshot: request details, people, approval, timeline, tasks, readiness, validation, issues (open first, max 50, texts shortened to fit DynamoDB's 400 KB item limit). `GET /v1/requests/{id}/report` returns it (404 until the request is completed).
+- **Notifications:** closing notifies every member except the actor through the normal status-change notice. The last validation result also writes `VALIDATION_COMPLETED` (owner and participants).
+- **Frontend:** Validation and Report tabs (live mode only) and a closing dialog on the "Mark as completed" button.
+- **Checks run:** backend 160 / 160 tests and `cdk synth`; frontend 105 / 105 tests and build. Not run against real AWS.
+- **Not done:** PDF/export of the report (TASK 13); AI summary (TASK 11).
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -628,7 +638,7 @@ SOW 4.7 is only a heading, so these are **decisions to confirm with the owner**:
 | 07 (B) | Participation and tasks. **DONE locally on branch `task-07-participation-and-tasks`.** See section 14.4. | 4.3, 4.4 | — | — | Rules chosen for the open points are in 14.4; Dashboard task progress is not built |
 | 08 (C) | Readiness checklist. **DONE locally on branch `task-08-readiness-checklist`.** See section 14.5. | 4.6 | — | — | Template wording and who may mark items were decided in 14.5; confirm with the owner |
 | 09 (D) | Maintenance execution tracking. **DONE locally on branch `task-09-execution-tracking` (built on 08).** See section 14.6. | 4.7 (heading only) | — | — | The SOW has no criteria: everything in 14.6 is a decision to confirm with the owner |
-| 10 (E) | Validation and final report and closure | 4.9, 4.10 (heading only) | Validation per domain, remaining issues, final report, closing | 06, 09 | Closure rules and report contents |
+| 10 (E) | Validation, final report and closure. **DONE locally on branch `task-10-validation-and-final-report` (stacked on 09).** See section 14.7. | 4.9, 4.10 (heading only) | — | — | SOW 4.10 has no criteria: the closure rules in 14.7 are decisions to confirm with the owner |
 | 11 (F) | AI activity summary | 4.8, 5.7 | Bedrock summary, review before saving, stored in S3, enable the "Generate Summary" button | 07, 09, 10 | Model, language, who the "responsible employee" is |
 | 12 (G) | Scheduling and conflicts | 4.4 | Schedule page, conflict detection, Dashboard alerts; Dashboard "mine" view counts only owned requests | 06 | What counts as a conflict |
 | 13 (H) | Team, Settings and Reports pages | 4.4 | Team directory page, Settings (email preference), Reports and history | Reports: 10, 11 | Which reports and export formats |

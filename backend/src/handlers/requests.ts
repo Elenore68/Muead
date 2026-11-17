@@ -6,6 +6,11 @@ import { batchGet, ddb, itemKey, queryPage, TABLE, transact, txConditionFailed, 
 import { ApiError, badRequest, conflict } from "../lib/errors";
 import { assertTokenPartition, decodeToken, encodeToken, json, parseLimit, router, type Ctx } from "../lib/http";
 import { availableActions, parseCancelBody, parseTransitionBody, transitionAttrs, validateCancel, validateTransition } from "../lib/lifecycle";
+import { listEntries, openIssues } from "../lib/activity";
+import { buildReport, reportKey } from "../lib/report";
+import { listTasksOf } from "../lib/tasks";
+import { listMembers } from "../lib/members";
+import { listValidation, parseClosure, resolvedValidationChecks, validateClosure, validationPuts } from "../lib/validation";
 import { listItems, resolvedChecks, templatePuts, validateReadinessGate } from "../lib/readiness";
 import { assertEdit, assertView, buildMember, memberRequests, type ActivityRole } from "../lib/members";
 import {
@@ -330,16 +335,41 @@ const transition = async ({ caller, path, body }: Ctx) => {
   validateTransition({ canEdit: access.canEdit, request: r, to });
   if (version !== r.version) throw conflict("VERSION_CONFLICT", "The request was changed by someone else. Reload and try again.");
   const more: TransactItem[] = [];
+  const extra: Item = {};
   if (to === "READINESS") {
     // The checklist is copied onto the request in the same transaction that opens the Readiness stage.
     more.push(...templatePuts(r.id, new Date().toISOString()));
+  } else if (to === "VALIDATION") {
+    more.push(...validationPuts(r.id, new Date().toISOString()));
+  } else if (to === "COMPLETED") {
+    // Closing: every validation check has a result, a closing summary is written, remaining issues are listed when needed.
+    const closure = parseClosure(body);
+    const [validation, entries, tasks, readiness, members] = await Promise.all([
+      listValidation(r.id, true),
+      listEntries(r.id, true),
+      listTasksOf(r.id, true),
+      listItems(r.id, true),
+      listMembers(r.id, { consistent: true }),
+    ]);
+    validateClosure({ items: validation, openIssues: openIssues(entries).length, closure });
+    const now = new Date().toISOString();
+    more.push(...resolvedValidationChecks(validation));
+    more.push({
+      Put: {
+        TableName: TABLE,
+        Item: buildReport({ request: r, members, tasks, readiness, validation, activity: entries, closure, completedBy: caller, now }),
+        ConditionExpression: "attribute_not_exists(PK)",
+      },
+    });
+    // Keep the report's reference id out of the audit text; the report is read through GET /requests/{id}/report.
+    extra.finalReport = true;
   } else if (to === "IN_PROGRESS") {
     // Gate: every checklist item must be done or not applicable, and still be so when the transaction commits.
     const items = await listItems(r.id, true);
     validateReadinessGate(items);
     more.push(...resolvedChecks(items));
   }
-  return changeStatus({ r, to, caller, auditRole: access.auditRole, extra: {}, more });
+  return changeStatus({ r, to, caller, auditRole: access.auditRole, extra, more });
 };
 
 /* POST /requests/{id}/cancel  { reason, version } */

@@ -73,10 +73,10 @@ export const updateRequest = (id: string, version: number, fields: RequestFields
   api<{ id: string; version: number }>(`requests/${encodeURIComponent(id)}`, { method: "PATCH", body: { ...fields, version } });
 
 /** POST /requests/{id}/transition: the next lifecycle step (Approved > Scheduled > ... > Completed). */
-export const transitionRequest = (id: string, to: ApiStatus, version: number) =>
+export const transitionRequest = (id: string, to: ApiStatus, version: number, closure?: { summary: string; remainingIssues?: string }) =>
   api<{ requestId: string; status: ApiStatus; previousStatus: ApiStatus; version: number }>(`requests/${encodeURIComponent(id)}/transition`, {
     method: "POST",
-    body: { to, version },
+    body: { to, version, ...(closure ? { summary: closure.summary, ...(closure.remainingIssues ? { remainingIssues: closure.remainingIssues } : {}) } : {}) },
   });
 
 /** POST /requests/{id}/cancel: allowed before execution starts; the reason is required. */

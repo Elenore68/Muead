@@ -109,3 +109,8 @@ export const itemStateLabel = (s: string): string => ({ PENDING: "Pending", DONE
 
 /* ---------- TASK 09: activity log ---------- */
 export const severityLabel = (s: string | null): string => (s ? s[0] + s.slice(1).toLowerCase() : "");
+
+/* ---------- TASK 10: validation ---------- */
+export const domainLabel = (d: string): string =>
+  ({ APPLICATION: "Application", DATABASE: "Database", OS: "Operating system", INFRASTRUCTURE: "Infrastructure" } as Record<string, string>)[d] ?? d;
+export const resultLabel = (r: string): string => ({ PENDING: "Pending", PASSED: "Passed", FAILED: "Failed", NOT_APPLICABLE: "Not applicable" } as Record<string, string>)[r] ?? r;
