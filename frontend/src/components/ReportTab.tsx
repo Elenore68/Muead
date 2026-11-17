@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { FileText, Sparkles } from "lucide-react";
+import { FileText, Printer, Sparkles } from "lucide-react";
 import { ApiClientError, errorMessage } from "../api/client";
 import { domainLabel, formatDateTime, resultLabel, taskStatusLabel } from "../api/labels";
 import { generateSummary, MAX_SUMMARY_TEXT, saveSummary, type FinalReport, type SummaryLanguage } from "../api/validation";
@@ -36,6 +36,7 @@ export default function ReportTab({ requestId, status, report, retry, viewer, on
         <div className="report">
           <h3>{report.data.request.requestNo} – {report.data.request.title}</h3>
           <p className="cell-sub">Closed by {report.data.completedByName} on {when(report.data.generatedAt)}</p>
+          <button type="button" className="btn btn-outline no-print" onClick={() => window.print()}><Printer size={16} />Print / Save as PDF</button>
           <h3>Summary</h3>
           <p>{report.data.summary}</p>
           {requestId && <ActivitySummary requestId={requestId} report={report.data} canEdit={!!viewer?.canEdit} onChanged={onChanged} notify={notify} />}

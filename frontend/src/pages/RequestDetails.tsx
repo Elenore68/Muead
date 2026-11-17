@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Calendar, Check, Download, FileText, Flag, Layers, Link2, MoreVertical, Paperclip, X } from "lucide-react";
 import { Topbar } from "../components/Layout";
 import { Person, PriorityPill, StatusPill, Tabs } from "../components/ui";
@@ -36,7 +36,10 @@ type Flash = { kind: "success" | "error"; text: string } | null;
 
 function RequestDetailsView({ id }: { id: string }) {
   const nav = useNavigate();
-  const [tab, setTab] = useState("Details");
+  const loc = useLocation();
+  // Links from other pages (for example Reports) can open a tab directly.
+  const wanted = (loc.state as { tab?: string } | null)?.tab;
+  const [tab, setTab] = useState(config.apiEnabled && wanted && LIVE_TABS.includes(wanted) ? wanted : "Details");
   const { state, retry, refresh } = useRequestDetails(id);
   // Loaded the first time the Attachments tab is opened; kept while switching tabs.
   const attachments = useAttachments(id, tab === "Attachments");

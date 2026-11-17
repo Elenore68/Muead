@@ -2,14 +2,14 @@
 
 **Audience:** a developer who has never seen this project.
 **Repository folder (original machine):** `D:\Meaed\Muead`. **GitHub:** `Elenore68/Muead`.
-**Latest completed work:** branch `task-05-notifications` on GitHub: TASK 05 commit `87482934380fe33978aae2000aa0da5b16efa3a8`, followed by the commit that adds this document (see section 12).
+**Latest completed work:** TASK 01 to 13. TASK 01 to 07 are merged into `main` on GitHub. TASK 08 to 13 are on stacked branches (`task-08-readiness-checklist` … `task-13-team-settings-reports`), each built on the one before; merge them in order (sections 14.5 to 14.10). Sections 7 and 12 describe the state up to TASK 05 and were not rewritten.
 **Deployment:** **nothing has ever been deployed to AWS.**
 
 > ## Start here
 > **"Do not start coding immediately. First read this handover document, inspect the repository and Git status, review the SOW and design reference, and understand the completed tasks. Then ask the project owner to confirm the next task before making changes."**
 >
-> - **Recommended next task:** **TASK 06: Request Lifecycle and Complete Request Form.** It has **NOT started** and has **NOT been implemented**.
-> - **Already decided:** the product decisions for it are confirmed by the project owner in section 14.1, so you don't need to ask again.
+> - **Recommended next task:** **TASK 14: Deployment and operations** (section 14.2), after merging the TASK 08 to 13 branches in order and getting the owner's approval to deploy. **Nothing has been deployed and nothing has been tested against real AWS.**
+> - **Decisions to confirm:** the product decisions in 14.1 were confirmed by the project owner. The rules chosen for TASK 06 to 13 (sections 14.3 to 14.10) were decided during implementation because the SOW is silent; ask the owner to confirm them.
 
 Every Git fact in this document was checked with Git commands when it was written. Re-check before relying on it (section 17, step 3).
 
@@ -68,10 +68,10 @@ Every Git fact in this document was checked with Git commands when it was writte
 3. ✅ The owner adds participants and approvers, and chooses the approval policy.
 4. ✅ The owner submits it for approval. Approvers receive an in-app notification.
 5. ✅ Approvers approve or reject, with comments and full history. The owner can withdraw a pending request.
-6. ⏳ Schedule the activity, assign tasks, complete the readiness checklist.
-7. ⏳ Execute the maintenance and track progress.
-8. ⏳ Validate systems after maintenance and generate an AI summary.
-9. ⏳ Produce a final report and close the activity.
+6. ✅ Schedule the activity (with conflict warnings), assign tasks, complete the readiness checklist.
+7. ✅ Execute the maintenance and track progress (notes and issues).
+8. ✅ Validate systems after maintenance; the AI summary is built but disabled.
+9. ✅ Produce a final report and close the activity.
 
 ---
 
@@ -650,6 +650,14 @@ The SOW does not define a conflict, so this is a **decision to confirm with the 
 - **Not done:** Dashboard alerts for conflicts (kept out so the Dashboard and its mock mode stay unchanged), a calendar grid view, reminders (TASK 14).
 - **Checks run:** backend 191 / 191 tests and `cdk synth` (the new Schedule Lambda is read-only); frontend 120 / 120 tests and build.
 
+### 14.10 TASK 13 as implemented (branch `task-13-team-settings-reports`, stacked on 12)
+No new backend routes: the pages use `GET /users`, `GET /requests`, `PATCH /me` and `GET /requests/{id}/report`. All three pages exist in live mode only; mock mode keeps its placeholders.
+- **Team:** a name search over the people directory (at least 2 letters, "can approve" filter). People appear after their first sign-in; no email addresses are shown.
+- **Settings:** change your display name and the email-notification preference (`PATCH /me`). The email address is read-only. Email is sent only when the platform has email turned on (still disabled).
+- **Reports (decision on formats):** finished requests (Completed or Cancelled) with search and paging, a link that opens the request's **Report** tab, and a **CSV export** of the list. Cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe so spreadsheets never run them as formulas; the file has a UTF-8 BOM so Arabic opens correctly. One final report can be **printed or saved as PDF** from the Report tab (browser print, print styles hide the menus). No server-side PDF.
+- **Not done:** reports across many requests (charts, per-team statistics), a PDF generated on the server, a notification history page, a profile picture.
+- **Checks run:** frontend 135 / 135 tests and build; backend unchanged (191 / 191).
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -662,7 +670,7 @@ The SOW does not define a conflict, so this is a **decision to confirm with the 
 | 10 (E) | Validation, final report and closure. **DONE locally on branch `task-10-validation-and-final-report` (stacked on 09).** See section 14.7. | 4.9, 4.10 (heading only) | — | — | SOW 4.10 has no criteria: the closure rules in 14.7 are decisions to confirm with the owner |
 | 11 (F) | AI activity summary. **DONE locally on branch `task-11-ai-summary` (stacked on 10), DISABLED by default.** See section 14.8. | 4.8, 5.7 | — | 07, 09, 10 | Model id and who may enable it (14.8) |
 | 12 (G) | Scheduling and conflicts. **DONE locally on branch `task-12-scheduling-and-conflicts` (stacked on 11).** See section 14.9. | 4.4 | — | 06 | The conflict definition in 14.9 is a decision to confirm; Dashboard conflict alerts are not built |
-| 13 (H) | Team, Settings and Reports pages | 4.4 | Team directory page, Settings (email preference), Reports and history | Reports: 10, 11 | Which reports and export formats |
+| 13 (H) | Team, Settings and Reports pages. **DONE locally on branch `task-13-team-settings-reports` (stacked on 12).** See section 14.10. | 4.4 | — | 10, 11 | Report formats were decided in 14.10 (CSV list, print/PDF for one report) |
 | 14 (I) | Deployment and operations | 5.1, 5.5, 5.6, 5.9 | First deploy (by the owner), test users, end-to-end test with two users, Amplify plus CORS update, EventBridge reminders, Step Functions decision, enable SES, alarms, dead-letter queue, MFA in the UI, token-storage review | — (reminders need 06 and 07) | When to deploy; SES sender |
 
 **Suggested acceptance criteria for TASK 06:**

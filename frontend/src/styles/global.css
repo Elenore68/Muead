@@ -287,3 +287,10 @@ td { padding: 12px var(--s-3); border-top: 1px solid var(--c-border); vertical-a
 .task-actions { display: flex; align-items: center; gap: var(--s-2); flex: none; }
 .task-actions .select { padding: 6px var(--s-2); }
 .part-answer { display: flex; flex-wrap: wrap; align-items: center; gap: var(--s-2); margin-top: var(--s-3); }
+
+/* TASK 13: printing a final report (Report tab > Print / Save as PDF) */
+@media print {
+  .sidebar, .topbar, .menu-btn, .tabs, .side-stack, .detail-head .btn-icon, .card-actions, .notice, .no-print { display: none !important; }
+  .shell { display: block; }
+  .card { box-shadow: none; break-inside: avoid; }
+}
