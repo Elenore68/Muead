@@ -154,9 +154,20 @@ export class MueadStack extends cdk.Stack {
     const fnValidation = mkFn("Validation", "validation.ts");
     const fnActivity = mkFn("Activity", "activity.ts");
     const fnReadiness = mkFn("Readiness", "readiness.ts");
+    const fnSummary = mkFn("Summary", "summary.ts");
     const fnNotifications = mkFn("Notifications", "notifications.ts");
     const fnNotifier = mkFn("Notifier", "notifier.ts");
 
+    // ---------- AI summary (TASK 11, SOW 4.8 / 5.7): disabled by default ----------
+    if (cfg.ai.enabled && !cfg.ai.modelId) throw new Error("config.ai.enabled requires config.ai.modelId (a Bedrock model enabled for the account)");
+    fnSummary.addEnvironment("AI_ENABLED", String(cfg.ai.enabled));
+    fnSummary.addEnvironment("AI_MODEL_ID", cfg.ai.enabled ? cfg.ai.modelId : "");
+    if (cfg.ai.enabled) {
+      // Least privilege: invoke only the configured model. Not granted while AI is disabled.
+      fnSummary.addToRolePolicy(
+        new iam.PolicyStatement({ actions: ["bedrock:InvokeModel"], resources: [`arn:aws:bedrock:${this.region}::foundation-model/${cfg.ai.modelId}`] }),
+      );
+    }
     // ---------- Notifications (TASK 05, SOW 4.3 / 4.4 / 5.5) ----------
     if (cfg.email.enabled && !cfg.email.fromAddress.includes("@")) {
       throw new Error("config.email.enabled requires config.email.fromAddress (an SES-verified sender)");
@@ -199,6 +210,7 @@ export class MueadStack extends cdk.Stack {
     table.grantReadWriteData(fnMembers);
     table.grantReadWriteData(fnApprovals);
     table.grantReadWriteData(fnTasks);
+    table.grantReadWriteData(fnSummary);
     table.grantReadWriteData(fnValidation);
     table.grantReadWriteData(fnActivity);
     table.grantReadWriteData(fnReadiness);
@@ -317,6 +329,10 @@ export class MueadStack extends cdk.Stack {
       { method: "GET", path: "requests/{requestId}/validation" },
       { method: "PATCH", path: "requests/{requestId}/validation/{domain}" },
       { method: "GET", path: "requests/{requestId}/report" },
+    ]);
+    wire(fnSummary, [
+      { method: "POST", path: "requests/{requestId}/report/summary/generate" },
+      { method: "PUT", path: "requests/{requestId}/report/summary" },
     ]);
     wire(fnTasks, [
       { method: "GET", path: "requests/{requestId}/tasks" },

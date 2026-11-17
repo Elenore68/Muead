@@ -26,6 +26,19 @@ export const MAX_NOTE = 1000;
 export const MAX_SUMMARY = 5000;
 export const MAX_REMAINING = 2000;
 
+/** TASK 11: the reviewed activity summary saved on the report. */
+export interface SavedSummary {
+  text: string;
+  language: "en" | "ar";
+  aiAssisted: boolean;
+  reviewedBy: string;
+  reviewedByName: string;
+  reviewedAt: string;
+}
+
+export const MAX_SUMMARY_TEXT = 5000;
+export type SummaryLanguage = "en" | "ar";
+
 /** The report is a snapshot written when the request is closed. */
 export interface FinalReport {
   requestId: string;
@@ -48,6 +61,7 @@ export interface FinalReport {
   tasks: { total: number; done: number; percent: number; items: { title: string; assignee: string; status: string; dueDate: string | null }[] };
   readiness: { total: number; resolved: number; percent: number; items: { group: string; title: string; state: string; note: string | null }[] };
   validation: { total: number; passed: number; failed: number; items: { domain: string; result: string; note: string | null }[] };
+  aiSummary?: SavedSummary;
   activity: { notes: number; issues: { text: string; severity: string | null; state: string | null; resolutionNote: string | null }[]; openIssues: number };
 }
 
@@ -56,3 +70,10 @@ export const getValidation = (requestId: string, signal?: AbortSignal) => api<Va
 export const setResult = (requestId: string, domain: Domain, version: number, result: Result, note?: string) =>
   api<ValidationItem>(`requests/${enc(requestId)}/validation/${enc(domain)}`, { method: "PATCH", body: { version, result, ...(note ? { note } : {}) } });
 export const getReport = (requestId: string, signal?: AbortSignal) => api<FinalReport>(`requests/${enc(requestId)}/report`, { signal });
+
+/** TASK 11: a DRAFT from the AI model. Nothing is saved. Fails with code AI_DISABLED while AI is not enabled. */
+export const generateSummary = (requestId: string, language: SummaryLanguage) =>
+  api<{ draft: string; language: SummaryLanguage; model: string; saved: false }>(`requests/${enc(requestId)}/report/summary/generate`, { method: "POST", body: { language } });
+/** TASK 11: saves the text the person reviewed (and possibly edited). */
+export const saveSummary = (requestId: string, input: { text: string; aiAssisted: boolean; language: SummaryLanguage }) =>
+  api<SavedSummary>(`requests/${enc(requestId)}/report/summary`, { method: "PUT", body: input });

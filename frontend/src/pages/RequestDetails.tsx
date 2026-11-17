@@ -163,7 +163,7 @@ function RequestDetailsView({ id }: { id: string }) {
           notify={(kind, text) => setFlash({ kind, text })}
         />
       ) : tab === "Report" && live ? (
-        <ReportTab status={live.status} report={report.state} retry={report.retry} />
+        <ReportTab requestId={live.id} status={live.status} report={report.state} retry={report.retry} viewer={live.viewer} onChanged={refreshAll} notify={(kind, text) => setFlash({ kind, text })} />
       ) : tab === "Activity" && live ? (
         <ActivityTab
           requestId={live.id}

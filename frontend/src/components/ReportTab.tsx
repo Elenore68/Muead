@@ -1,19 +1,26 @@
-import { FileText } from "lucide-react";
+import { useState } from "react";
+import { FileText, Sparkles } from "lucide-react";
+import { ApiClientError, errorMessage } from "../api/client";
 import { domainLabel, formatDateTime, resultLabel, taskStatusLabel } from "../api/labels";
-import type { FinalReport } from "../api/validation";
+import { generateSummary, MAX_SUMMARY_TEXT, saveSummary, type FinalReport, type SummaryLanguage } from "../api/validation";
 import type { ApiStatus } from "../api/requests";
 import type { ResourceState } from "../data/useResource";
+import type { Viewer } from "../data/permissions";
 
 interface Props {
+  requestId?: string;
   status: ApiStatus;
   report: ResourceState<FinalReport>;
   retry: () => void;
+  viewer?: Viewer;
+  onChanged?: () => void;
+  notify?: (kind: "success" | "error", text: string) => void;
 }
 
 const when = (v: string | null | undefined) => (v ? formatDateTime(v) : "—");
 
 /** TASK 10: the final report, a snapshot written when the request was closed. */
-export default function ReportTab({ status, report, retry }: Props) {
+export default function ReportTab({ requestId, status, report, retry, viewer, onChanged, notify }: Props) {
   return (
     <section className="card" style={{ marginTop: 16 }} aria-busy={report.kind === "loading"}>
       <h2 className="card-title"><FileText size={20} />Final report</h2>
@@ -31,6 +38,7 @@ export default function ReportTab({ status, report, retry }: Props) {
           <p className="cell-sub">Closed by {report.data.completedByName} on {when(report.data.generatedAt)}</p>
           <h3>Summary</h3>
           <p>{report.data.summary}</p>
+          {requestId && <ActivitySummary requestId={requestId} report={report.data} canEdit={!!viewer?.canEdit} onChanged={onChanged} notify={notify} />}
           {report.data.remainingIssues && (<><h3>Remaining issues</h3><p>{report.data.remainingIssues}</p></>)}
           <h3>Maintenance</h3>
           <p className="cell-sub">
@@ -65,5 +73,84 @@ export default function ReportTab({ status, report, retry }: Props) {
         </div>
       )}
     </section>
+  );
+}
+
+/** TASK 11: the activity summary. An AI draft is only a draft: a person reviews and saves it. */
+function ActivitySummary({ requestId, report, canEdit, onChanged, notify }: { requestId: string; report: FinalReport; canEdit: boolean; onChanged?: () => void; notify?: Props["notify"] }) {
+  const [language, setLanguage] = useState<SummaryLanguage>("en");
+  const [draft, setDraft] = useState<string | null>(null);
+  const [aiAssisted, setAiAssisted] = useState(false);
+  const [busy, setBusy] = useState<"" | "generate" | "save">("");
+  const [error, setError] = useState("");
+  const saved = report.aiSummary;
+
+  const generate = async () => {
+    setBusy("generate");
+    setError("");
+    try {
+      const res = await generateSummary(requestId, language);
+      setDraft(res.draft);
+      setAiAssisted(true);
+    } catch (e) {
+      setError(e instanceof ApiClientError && e.code === "AI_DISABLED" ? `${e.message}` : errorMessage(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  const save = async () => {
+    if (!draft?.trim()) return setError("The summary is empty.");
+    setBusy("save");
+    setError("");
+    try {
+      await saveSummary(requestId, { text: draft.trim(), aiAssisted, language });
+      setDraft(null);
+      notify?.("success", "The summary was saved.");
+      onChanged?.();
+    } catch (e) {
+      setError(errorMessage(e));
+    } finally {
+      setBusy("");
+    }
+  };
+
+  return (
+    <div className="card" aria-label="Activity summary" style={{ marginBottom: 12 }}>
+      <h3><Sparkles size={16} /> Activity summary</h3>
+      {saved && draft === null && (
+        <>
+          <p>{saved.text}</p>
+          <p className="cell-sub">Reviewed by {saved.reviewedByName} on {when(saved.reviewedAt)}{saved.aiAssisted ? " · written with AI assistance" : ""}</p>
+        </>
+      )}
+      {!saved && draft === null && <p className="cell-sub">No summary has been saved yet.</p>}
+      {draft !== null && (
+        <div className="field">
+          <label htmlFor="summary-text">{aiAssisted ? "AI draft: review and edit before saving" : "Summary"}</label>
+          <textarea id="summary-text" className="textarea" value={draft} maxLength={MAX_SUMMARY_TEXT} disabled={busy !== ""} onChange={(e) => setDraft(e.target.value)} />
+        </div>
+      )}
+      {error && <p role="alert" className="notice error">{error}</p>}
+      {canEdit && (
+        <div className="card-actions">
+          {draft === null ? (
+            <>
+              <select className="select" aria-label="Summary language" value={language} disabled={busy !== ""} onChange={(e) => setLanguage(e.target.value as SummaryLanguage)}>
+                <option value="en">English</option>
+                <option value="ar">العربية</option>
+              </select>
+              <button type="button" className="btn btn-outline" onClick={generate} disabled={busy !== ""}>{busy === "generate" ? "Writing…" : "Generate summary"}</button>
+              <button type="button" className="btn btn-outline" onClick={() => { setDraft(saved?.text ?? ""); setAiAssisted(false); }} disabled={busy !== ""}>{saved ? "Edit summary" : "Write summary"}</button>
+            </>
+          ) : (
+            <>
+              <button type="button" className="btn btn-primary" onClick={save} disabled={busy !== ""}>{busy === "save" ? "Saving…" : "Save summary"}</button>
+              <button type="button" className="btn btn-outline" onClick={() => { setDraft(null); setError(""); }} disabled={busy !== ""}>Discard</button>
+            </>
+          )}
+        </div>
+      )}
+    </div>
   );
 }

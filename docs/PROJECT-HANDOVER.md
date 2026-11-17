@@ -629,6 +629,17 @@ SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are 
 - **Checks run:** backend 160 / 160 tests and `cdk synth`; frontend 105 / 105 tests and build. Not run against real AWS.
 - **Not done:** PDF/export of the report (TASK 13); AI summary (TASK 11).
 
+### 14.8 TASK 11 as implemented (branch `task-11-ai-summary`, stacked on 10)
+- **Disabled by default, like email.** `backend/infra/config.ts` → `ai: { enabled: false, modelId: "" }`. While disabled the stack grants no `bedrock:*` permission and no Bedrock client is created; the generate call answers `503 AI_DISABLED` and people can still write the summary by hand. To enable later (needs the owner's approval): enable a Bedrock model for the account, set both fields, deploy. The permission is limited to `bedrock:InvokeModel` on that one model (synth verified both ways). Some models are reachable only through an inference profile; if so, the policy resource must be adjusted when enabling.
+- **Flow (decisions):** `POST /v1/requests/{id}/report/summary/generate {language: en|ar}` returns a **draft** from the stored final report and saves nothing. `PUT /v1/requests/{id}/report/summary {text, aiAssisted, language}` saves the text the person reviewed. Owner or admin only; the request must be Completed.
+- **"Responsible employee" (decision):** whoever saves the reviewed summary. Their name and the time are stored with it (`aiSummary` on the report).
+- **Safety:** the report text is user-written, so it is sent to the model as delimited data and the system prompt says to ignore instructions inside it; the client cannot choose the model; model errors become `502 AI_UNAVAILABLE` without details; the text is not copied into audit entries.
+- **Dependencies:** `@aws-sdk/client-bedrock-runtime` 3.1167.0 (same version as the other AWS SDK clients).
+- **Frontend:** an "Activity summary" panel in the Report tab: language, Generate, edit, Save, Discard; the saved summary shows who reviewed it and whether AI helped.
+- **Not verified:** a real Bedrock call (nothing is deployed). Prompt quality and the Arabic output need a human check once enabled.
+- **Not done:** storing the summary in S3 (SOW 5.7 mentions it); it is stored in the table with the report.
+- **Checks run:** backend 174 / 174 tests and `cdk synth`; frontend 110 / 110 tests and build.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -639,7 +650,7 @@ SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are 
 | 08 (C) | Readiness checklist. **DONE locally on branch `task-08-readiness-checklist`.** See section 14.5. | 4.6 | — | — | Template wording and who may mark items were decided in 14.5; confirm with the owner |
 | 09 (D) | Maintenance execution tracking. **DONE locally on branch `task-09-execution-tracking` (built on 08).** See section 14.6. | 4.7 (heading only) | — | — | The SOW has no criteria: everything in 14.6 is a decision to confirm with the owner |
 | 10 (E) | Validation, final report and closure. **DONE locally on branch `task-10-validation-and-final-report` (stacked on 09).** See section 14.7. | 4.9, 4.10 (heading only) | — | — | SOW 4.10 has no criteria: the closure rules in 14.7 are decisions to confirm with the owner |
-| 11 (F) | AI activity summary | 4.8, 5.7 | Bedrock summary, review before saving, stored in S3, enable the "Generate Summary" button | 07, 09, 10 | Model, language, who the "responsible employee" is |
+| 11 (F) | AI activity summary. **DONE locally on branch `task-11-ai-summary` (stacked on 10), DISABLED by default.** See section 14.8. | 4.8, 5.7 | — | 07, 09, 10 | Model id and who may enable it (14.8) |
 | 12 (G) | Scheduling and conflicts | 4.4 | Schedule page, conflict detection, Dashboard alerts; Dashboard "mine" view counts only owned requests | 06 | What counts as a conflict |
 | 13 (H) | Team, Settings and Reports pages | 4.4 | Team directory page, Settings (email preference), Reports and history | Reports: 10, 11 | Which reports and export formats |
 | 14 (I) | Deployment and operations | 5.1, 5.5, 5.6, 5.9 | First deploy (by the owner), test users, end-to-end test with two users, Amplify plus CORS update, EventBridge reminders, Step Functions decision, enable SES, alarms, dead-letter queue, MFA in the UI, token-storage review | — (reminders need 06 and 07) | When to deploy; SES sender |

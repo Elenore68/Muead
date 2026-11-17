@@ -700,3 +700,7 @@ These rules apply to every event:
 - `POST /v1/requests/{requestId}/transition` to VALIDATION creates the four checks. To COMPLETED the body is `{ to: "COMPLETED", version, summary (1..5000), remainingIssues? (max 2000) }`. Errors: `409 VALIDATION_INCOMPLETE` (details list pending domains), `400` when `summary` is missing or when `remainingIssues` is missing although a check failed or an issue is open.
 - `GET /v1/requests/{requestId}/report` -> the stored final report (any member or admin); `404` until the request is COMPLETED.
 - Audit actions: `VALIDATION_UPDATED`, `VALIDATION_COMPLETED`; closing is the usual `REQUEST_STATUS_CHANGED` with `finalReport: true`.
+
+## 19. TASK 11: AI activity summary (implemented, disabled by default)
+- `POST /v1/requests/{requestId}/report/summary/generate` body `{ language?: "en" | "ar" }` -> `{ draft, language, model, saved: false }`. Owner or admin, request COMPLETED. Errors: `503 AI_DISABLED`, `502 AI_UNAVAILABLE` / `AI_EMPTY_RESPONSE`, `404` (no report), `403`. Nothing is stored.
+- `PUT /v1/requests/{requestId}/report/summary` body `{ text (1..5000), aiAssisted?: boolean, language?: "en" | "ar" }` -> `{ text, language, aiAssisted, reviewedBy, reviewedByName, reviewedAt }`. Owner or admin. Stored as `aiSummary` on the final report (returned by `GET .../report`). Audit action `SUMMARY_SAVED` (flags only, no text).

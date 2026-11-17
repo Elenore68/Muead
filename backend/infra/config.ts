@@ -13,6 +13,12 @@ export interface EnvConfig {
    * While disabled, the stack grants no SES permission and the notifier never creates an SES client.
    */
   email: { enabled: boolean; fromAddress: string };
+  /**
+   * AI activity summary via Amazon Bedrock (TASK 11). DISABLED by default.
+   * To enable later: pick a model that is enabled for the account in Bedrock, set both fields, deploy.
+   * While disabled, the stack grants no bedrock:* permission and no Bedrock client is created.
+   */
+  ai: { enabled: boolean; modelId: string };
 }
 
 export const environments: Record<string, EnvConfig> = {
@@ -22,5 +28,6 @@ export const environments: Record<string, EnvConfig> = {
     // Local frontend dev server. Add the Amplify domain here once hosting exists.
     allowedOrigins: ["http://localhost:8002"],
     email: { enabled: false, fromAddress: "" },
+    ai: { enabled: false, modelId: "" },
   },
 };
