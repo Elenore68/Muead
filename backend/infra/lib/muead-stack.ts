@@ -11,6 +11,7 @@ import * as logs from "aws-cdk-lib/aws-logs";
 import * as apigw from "aws-cdk-lib/aws-apigateway";
 import * as iam from "aws-cdk-lib/aws-iam";
 import * as eventsources from "aws-cdk-lib/aws-lambda-event-sources";
+import * as amplify from "aws-cdk-lib/aws-amplify";
 import type { EnvConfig } from "../config";
 
 export interface MueadStackProps extends cdk.StackProps {
@@ -69,6 +70,21 @@ export class MueadStack extends cdk.Stack {
     }
 
     // ---------- S3: attachments and reports (SOW 5.4) ----------
+    // ---------- Frontend hosting (SOW 5.1): AWS Amplify, manual deployments (no Git connection) ----------
+    // The built frontend is uploaded with frontend/scripts/deploy-amplify.sh. The hosted address is added to CORS.
+    const web = new amplify.CfnApp(this, "WebApp", {
+      name: `${prefix}-web`,
+      platform: "WEB",
+      // Single-page app: every path that is not a file is served by index.html (React Router handles it).
+      customRules: [
+        { source: "</^[^.]+$|\\.(?!(css|gif|ico|jpg|jpeg|js|png|txt|svg|woff|woff2|ttf|map|json|webp)$)([^.]+$)/>", target: "/index.html", status: "200" },
+      ],
+    });
+    const webBranch = new amplify.CfnBranch(this, "WebBranch", { appId: web.attrAppId, branchName: "main", stage: "PRODUCTION" });
+    const hostedOrigin = `https://${webBranch.branchName}.${web.attrDefaultDomain}`;
+    // Hosted site first: it is the address used in email links.
+    const origins = [hostedOrigin, ...cfg.allowedOrigins];
+
     const bucket = new s3.Bucket(this, "FilesBucket", {
       bucketName: undefined, // generated: avoids global-name collisions
       blockPublicAccess: s3.BlockPublicAccess.BLOCK_ALL,
@@ -82,7 +98,7 @@ export class MueadStack extends cdk.Stack {
         {
           // Browser uploads/downloads with pre-signed URLs.
           allowedMethods: [s3.HttpMethods.PUT, s3.HttpMethods.GET],
-          allowedOrigins: cfg.allowedOrigins,
+          allowedOrigins: origins,
           allowedHeaders: ["*"],
           exposedHeaders: ["ETag"],
           maxAge: 3000,
@@ -121,7 +137,7 @@ export class MueadStack extends cdk.Stack {
     const commonEnv = {
       TABLE_NAME: table.tableName,
       BUCKET_NAME: bucket.bucketName,
-      ALLOWED_ORIGIN: cfg.allowedOrigins[0],
+      ALLOWED_ORIGIN: cdk.Fn.join(",", origins),
       NODE_OPTIONS: "--enable-source-maps",
     };
     const mkFn = (name: string, entry: string): nodejs.NodejsFunction =>
@@ -175,7 +191,7 @@ export class MueadStack extends cdk.Stack {
     }
     fnNotifier.addEnvironment("EMAIL_ENABLED", String(cfg.email.enabled));
     fnNotifier.addEnvironment("EMAIL_FROM", cfg.email.enabled ? cfg.email.fromAddress : "");
-    fnNotifier.addEnvironment("APP_URL", cfg.allowedOrigins[0]);
+    fnNotifier.addEnvironment("APP_URL", hostedOrigin);
     fnNotifier.addEventSource(
       new eventsources.DynamoEventSource(table, {
         startingPosition: lambda.StartingPosition.LATEST,
@@ -231,7 +247,7 @@ export class MueadStack extends cdk.Stack {
         metricsEnabled: true,
       },
       defaultCorsPreflightOptions: {
-        allowOrigins: cfg.allowedOrigins,
+        allowOrigins: origins,
         allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
         allowHeaders: ["Authorization", "Content-Type", "Idempotency-Key"],
         maxAge: cdk.Duration.hours(1),
@@ -245,7 +261,8 @@ export class MueadStack extends cdk.Stack {
       api.addGatewayResponse(id, {
         type,
         responseHeaders: {
-          "Access-Control-Allow-Origin": `'${cfg.allowedOrigins[0]}'`,
+          // The hosted site; the local dev server still works but sees gateway errors (401/5xx) as network errors.
+          "Access-Control-Allow-Origin": `'${hostedOrigin}'`,
           "Access-Control-Allow-Headers": "'Authorization,Content-Type,Idempotency-Key'",
         },
       });
@@ -363,6 +380,8 @@ export class MueadStack extends cdk.Stack {
 
     // ---------- Outputs (needed by the frontend configuration) ----------
     new cdk.CfnOutput(this, "ApiUrl", { value: api.url });
+    new cdk.CfnOutput(this, "WebAppId", { value: web.attrAppId });
+    new cdk.CfnOutput(this, "WebUrl", { value: hostedOrigin });
     new cdk.CfnOutput(this, "UserPoolId", { value: userPool.userPoolId });
     new cdk.CfnOutput(this, "UserPoolClientId", { value: userPoolClient.userPoolClientId });
     new cdk.CfnOutput(this, "Region", { value: this.region });

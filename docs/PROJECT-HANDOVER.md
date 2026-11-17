@@ -683,6 +683,12 @@ This **replaces** the earlier rule that the owner chooses approvers (sections 8,
 - **Demo accounts** in the dev stack (passwords given to the owner in chat, not stored in the repository): `approver@muead-test.example` (manager, `ApprovalEligible`), `maintenance@muead-test.example` (normal user who creates requests), `admin@muead-test.example` (`PlatformAdmin`). They have signed in once, so the approver already receives submitted requests. Delete these and the two `e2e.*` users before real use.
 - Verified against the deployed stack: a request created and submitted by the maintenance account reached the approver's inbox with no approver chosen; the admin can open it. Frontend 139 / 139 tests.
 
+### 14.14 Frontend hosting (2026-11-17)
+- **Live site:** https://main.d7t6x10y7twg1.amplifyapp.com (AWS Amplify Hosting, app `muead-dev-web`, created by the CDK stack as `AWS::Amplify::App` + `Branch main`, manual deployments, SPA rewrite to `index.html`). Publish with `frontend/scripts/deploy-amplify.sh` (`docs/DEPLOYMENT.md` section 2).
+- **CORS:** the API, the gateway preflight and the S3 bucket allow the hosted address and `http://localhost:8002`. Lambda responses echo the caller's origin when it is on the list (`corsOrigin` in `backend/src/lib/http.ts`), never `*`. Gateway-generated errors carry the hosted origin. Email links (`APP_URL`) point to the hosted site.
+- **Verified in Chrome on the hosted site:** sign-in, create a request with a PDF attachment (pre-signed S3 upload, so S3 CORS works), submit, the approver's inbox, approve, cancel. No browser errors. Backend 200 / 200 tests.
+- **Not done:** a custom domain, Git-connected automatic builds, a WAF.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 

@@ -16,10 +16,19 @@ npx cdk deploy --require-approval never
 ```
 The deploy prints `ApiUrl`, `UserPoolId`, `UserPoolClientId`, `Region`, `TableName`, `FilesBucketName`.
 
-## 2. Connect the frontend
+## 2. Publish the frontend (AWS Amplify Hosting)
+The stack creates an Amplify app (`muead-dev-web`, branch `main`) with no Git connection. Publish the current code with:
+```
+AWS_PROFILE=signin frontend/scripts/deploy-amplify.sh
+```
+It reads the stack outputs, builds the frontend with them, uploads the build and waits until it is live at the `WebUrl` output
+(dev: https://main.d7t6x10y7twg1.amplifyapp.com). Run it again after every frontend change. Deploy the backend first when both changed.
+CORS allows the hosted address and `http://localhost:8002`.
+
+## 2b. Run the frontend locally against the same backend
 Create `frontend/.env.local` (git-ignored) from `frontend/.env.example` with `VITE_API_BASE_URL` (the `ApiUrl`, with the `/v1/` stage),
 `VITE_COGNITO_USER_POOL_ID` and `VITE_COGNITO_CLIENT_ID`, then `npm run dev` in `frontend/` (http://localhost:8002).
-CORS allows only `http://localhost:8002` until a hosting domain is added to `allowedOrigins` in `config.ts`.
+Local errors returned by API Gateway itself (expired token 401, throttling, 5xx) carry the hosted origin only, so on localhost they show as a network error.
 
 ## 3. Create test users (there is no self sign-up)
 For each person (replace the values; pick a strong temporary password and share it privately, never in Git). **Managers** are the people in the `ApprovalEligible` group: every submitted request goes to all of them automatically (except its owner), after they have signed in once.
@@ -39,7 +48,7 @@ The first sign-in asks for a new password. People appear in the directory after 
 4. Open the Report tab; check the bell notifications on both accounts and the Schedule page.
 
 ## 5. Things that stay off until the owner decides
-Email (SES) and AI summaries (Bedrock) are disabled in `config.ts`. Hosting (Amplify), alarms and a dead-letter queue are not built.
+Email (SES) and AI summaries (Bedrock) are disabled in `config.ts`. Alarms, a dead-letter queue and a custom domain are not built.
 
 ## Cost and cleanup
 Cognito, DynamoDB (on demand), Lambda and API Gateway cost very little at test volume. The table, bucket, user pool and KMS key are

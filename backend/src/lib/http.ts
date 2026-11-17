@@ -2,9 +2,20 @@ import type { APIGatewayProxyEvent, APIGatewayProxyResult } from "aws-lambda";
 import { getCaller, type Caller } from "./auth";
 import { ApiError, badRequest } from "./errors";
 
+/** Browser origins allowed by CORS: a comma-separated list (local dev server and the hosted frontend). */
+export const allowedOrigins = (env: NodeJS.ProcessEnv = process.env): string[] =>
+  (env.ALLOWED_ORIGIN ?? "").split(",").map((o) => o.trim()).filter(Boolean);
+
+/** The request's Origin when it is allowed, otherwise the first allowed origin (never "*", never an unknown origin). */
+export const corsOrigin = (requestOrigin: string | undefined, env: NodeJS.ProcessEnv = process.env): string => {
+  const list = allowedOrigins(env);
+  return requestOrigin && list.includes(requestOrigin) ? requestOrigin : list[0] ?? "";
+};
+
 const baseHeaders = (): Record<string, string> => ({
   "Content-Type": "application/json",
-  "Access-Control-Allow-Origin": process.env.ALLOWED_ORIGIN ?? "",
+  "Access-Control-Allow-Origin": corsOrigin(undefined),
+  Vary: "Origin",
   "Access-Control-Allow-Headers": "Authorization,Content-Type,Idempotency-Key",
   "X-Content-Type-Options": "nosniff",
 });
@@ -23,6 +34,13 @@ export interface Ctx {
   path: Record<string, string>;
   query: Record<string, string>;
 }
+/** Echoes the caller's Origin when it is one of the allowed origins (API Gateway headers are case-insensitive). */
+const withCors = (res: APIGatewayProxyResult, event: APIGatewayProxyEvent): APIGatewayProxyResult => {
+  const h = event.headers ?? {};
+  const origin = h.origin ?? h.Origin ?? Object.entries(h).find(([k]) => k.toLowerCase() === "origin")?.[1];
+  return { ...res, headers: { ...res.headers, "Access-Control-Allow-Origin": corsOrigin(origin) } };
+};
+
 export type RouteHandler = (ctx: Ctx) => Promise<APIGatewayProxyResult>;
 
 /**
@@ -51,16 +69,16 @@ export const router =
       const path: Record<string, string> = {};
       for (const [k, v] of Object.entries(event.pathParameters ?? {})) if (v !== undefined) path[k] = decodeURIComponent(v);
       const res = await h({ event, caller: getCaller(event), body, path, query });
-      return res;
+      return withCors(res, event);
     } catch (err) {
       if (err instanceof ApiError) {
-        return json(err.status, {
+        return withCors(json(err.status, {
           error: { code: err.code, message: err.message, details: err.details, requestId: event.requestContext?.requestId },
-        });
+        }), event);
       }
       // Never leak internals; log the full error for CloudWatch.
       console.error(JSON.stringify({ level: "error", requestId: event.requestContext?.requestId, message: String(err), stack: (err as Error)?.stack }));
-      return json(500, { error: { code: "INTERNAL_ERROR", message: "Unexpected error", requestId: event.requestContext?.requestId } });
+      return withCors(json(500, { error: { code: "INTERNAL_ERROR", message: "Unexpected error", requestId: event.requestContext?.requestId } }), event);
     }
   };
 
