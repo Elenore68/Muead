@@ -5,6 +5,7 @@ import { Avatar, LogoMark } from "./ui";
 import { config } from "../config";
 import { useAuth } from "../auth/AuthContext";
 import NotificationBell from "./NotificationBell";
+import UserMenu from "./UserMenu";
 
 const nav = [
   { to: "/", label: "Dashboard", icon: Home, end: true },
@@ -70,10 +71,8 @@ export function Topbar({ title, subtitle, crumbs, action }: TopbarProps) {
           <button className="bell" aria-label="Notifications"><Bell size={22} /><i /></button>
         )}
         {live ? (
-          // Real signed-in user from GET /me. Clicking signs out (no user menu is designed yet).
-          <button className="user" aria-label={`Signed in as ${profile.displayName}. Sign out`} title="Sign out" onClick={signOut}>
-            <Avatar name={profile.displayName} initials={profile.initials} large />{profile.displayName}<ChevronDown size={16} />
-          </button>
+          // Real signed-in user from GET /me: a menu with Settings and Sign out.
+          <UserMenu name={profile.displayName} initials={profile.initials} email={profile.email} roles={profile.roles} onSignOut={signOut} />
         ) : (
           <button className="user" aria-label="User menu"><Avatar name="Amal" large />Amal<ChevronDown size={16} /></button>
         )}
