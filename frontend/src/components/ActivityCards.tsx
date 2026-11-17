@@ -1,18 +1,14 @@
 import { useState } from "react";
-import { Check, Pencil, Plus, Send, Undo2, X } from "lucide-react";
+import { Check, Pencil, Plus, X } from "lucide-react";
 import { ApiClientError, errorMessage } from "../api/client";
-import { MAX_REASON, setApprovalPolicy, submitRequest, withdrawRequest, type ApprovalPolicy } from "../api/approvals";
+import type { ApprovalPolicy } from "../api/approvals";
 import { MAX_PARTICIPATION_NOTE, removeMember, respondToParticipation, type AssignableRole, type Member, type MembersResponse } from "../api/members";
 import type { ApiStatus } from "../api/requests";
-import { participationLabel, policyLabel, specialtyLabel } from "../api/labels";
+import { participationLabel, specialtyLabel } from "../api/labels";
 import {
-  activeApprovers,
   canChangeParticipants,
-  canChangePolicy,
   canEditMemberDetails,
   canRespondToParticipation,
-  canSubmit,
-  canWithdraw,
   type Viewer,
 } from "../data/permissions";
 import type { ResourceState } from "../data/useResource";
@@ -132,94 +128,6 @@ function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; ro
         />
       )}
     </>
-  );
-}
-
-/* ------------------------------------------------------------------ Approvers card (decision 7) */
-export function ApproversCard({ ctx }: { ctx: ActivityContext }) {
-  const [withdrawing, setWithdrawing] = useState(false);
-  const [busy, setBusy] = useState<"" | "submit" | "policy">("");
-  const members = ctx.members.kind === "ready" ? ctx.members.data.items : [];
-  const approverCount = activeApprovers(members).length;
-  const changePolicy = canChangePolicy(ctx.viewer, ctx.status);
-  const submittable = canSubmit(ctx.viewer, ctx.status);
-  const withdrawable = canWithdraw(ctx.viewer, ctx.status);
-
-  const onSubmit = async () => {
-    setBusy("submit");
-    try {
-      const res = await submitRequest(ctx.requestId, ctx.version);
-      ctx.notify("success", `Sent to ${res.approvers} manager${res.approvers === 1 ? "" : "s"} for approval (round ${res.approvalRound}).`);
-      ctx.onChanged();
-    } catch (e) {
-      report(ctx, e);
-    } finally {
-      setBusy("");
-    }
-  };
-
-  const onPolicy = async (policy: ApprovalPolicy) => {
-    setBusy("policy");
-    try {
-      await setApprovalPolicy(ctx.requestId, policy, ctx.version);
-      ctx.notify("success", `Approval policy: ${policyLabel(policy)}.`);
-      ctx.onChanged();
-    } catch (e) {
-      report(ctx, e);
-    } finally {
-      setBusy("");
-    }
-  };
-
-  return (
-    <div className="card" aria-busy={busy !== ""}>
-      <h3>Approvers (managers)</h3>
-      {changePolicy ? (
-        <div className="field" style={{ marginBottom: 8 }}>
-          <label htmlFor="approval-policy">Approval policy</label>
-          <select id="approval-policy" className="select" value={ctx.policy} disabled={busy !== ""} onChange={(e) => onPolicy(e.target.value as ApprovalPolicy)}>
-            <option value="ANY_ONE">{policyLabel("ANY_ONE")}</option>
-            <option value="ALL">{policyLabel("ALL")}</option>
-          </select>
-        </div>
-      ) : (
-        <p className="cell-sub" style={{ marginBottom: 8 }}>{policyLabel(ctx.policy)}</p>
-      )}
-      <MembersBody ctx={ctx} role="APPROVER" canChange={false} empty="Not sent yet. When you submit, the request goes to the managers automatically." />
-      {ctx.status === "PENDING_APPROVAL" && <p className="cell-sub">The managers above are reviewing this request.</p>}
-      {approverCount > 0 && (ctx.status === "DRAFT" || ctx.status === "REJECTED") && (
-        <p className="cell-sub">Submitting again sends it to the current managers again.</p>
-      )}
-      <div className="card-actions">
-        {submittable && (
-          <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy !== ""}>
-            <Send size={16} />{busy === "submit" ? "Submitting…" : "Submit for approval"}
-          </button>
-        )}
-        {withdrawable && (
-          <button type="button" className="btn btn-outline" onClick={() => setWithdrawing(true)}><Undo2 size={16} />Withdraw</button>
-        )}
-      </div>
-      {withdrawing && (
-        <TextActionDialog
-          title="Withdraw request"
-          intro="The request goes back to Draft. Pending approval decisions are closed; decisions already made stay in the history. You can then edit it and submit it again; it goes to the managers again."
-          label="Reason" required maxLength={MAX_REASON} submitLabel="Withdraw" busyLabel="Withdrawing…" tone="primary"
-          onClose={() => setWithdrawing(false)}
-          onSubmit={async (reason) => {
-            try {
-              await withdrawRequest(ctx.requestId, reason, ctx.version);
-            } catch (e) {
-              if (e instanceof ApiClientError && e.status === 409) ctx.onChanged();
-              throw e;
-            }
-            setWithdrawing(false);
-            ctx.notify("success", "The request was withdrawn and is a draft again.");
-            ctx.onChanged();
-          }}
-        />
-      )}
-    </div>
   );
 }
 

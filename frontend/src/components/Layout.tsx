@@ -2,7 +2,6 @@ import { useState, type ReactNode } from "react";
 import { NavLink, Outlet, useOutletContext } from "react-router-dom";
 import { Bell, CalendarDays, CheckCircle2, ChevronDown, FileText, Home, Menu, Settings, BarChart3, Users } from "lucide-react";
 import { Avatar, LogoMark } from "./ui";
-import { team } from "../data/mock";
 import { config } from "../config";
 import { useAuth } from "../auth/AuthContext";
 import NotificationBell from "./NotificationBell";
@@ -35,16 +34,6 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="side-title">Team</div>
-        <ul className="team">
-          {team.map((t) => (
-            <li key={t.name}>
-              <Avatar name={t.name} />
-              <span className="name">{t.name}</span>
-              <span className="dot-online" title="Online" />
-            </li>
-          ))}
-        </ul>
       </aside>
       {open && <div className="scrim" onClick={() => setOpen(false)} />}
       <main className="main">

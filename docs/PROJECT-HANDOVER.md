@@ -677,6 +677,12 @@ This **replaces** the earlier rule that the owner chooses approvers (sections 8,
 - **Limitations:** a manager appears only after their first sign-in; a revoked group membership takes effect at that person's next sign-in (mirror refresh) and, for decisions, within the token lifetime; there is no per-team or per-department routing (every manager gets every request).
 - **Verified:** backend 197 / 197 tests, frontend 137 / 137, and the 28-step smoke test against the deployed stack (the stack was updated in place).
 
+### 14.13 No approver section: submit goes straight to approval (owner request, 2026-11-17)
+- The **Approvers card is removed** from Request Details (no list, no policy selector). The Lifecycle card now has **Submit for approval** (Draft or Rejected) and **Withdraw** (while pending), and says "Waiting for approval." The managers are still picked by the backend (14.12); they simply no longer appear as a section. Who approved is shown in the **Approvals** tab. New requests use the default policy `ANY_ONE` (any one manager approves); the UI no longer lets the owner change it (the API still can).
+- The fake **Team list** (Sara, Shahad, Amal) in the sidebar is removed.
+- **Demo accounts** in the dev stack (passwords given to the owner in chat, not stored in the repository): `approver@muead-test.example` (manager, `ApprovalEligible`), `maintenance@muead-test.example` (normal user who creates requests), `admin@muead-test.example` (`PlatformAdmin`). They have signed in once, so the approver already receives submitted requests. Delete these and the two `e2e.*` users before real use.
+- Verified against the deployed stack: a request created and submitted by the maintenance account reached the approver's inbox with no approver chosen; the admin can open it. Frontend 139 / 139 tests.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 

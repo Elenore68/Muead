@@ -11,7 +11,7 @@ import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
 import { useActivityLog, useApprovalHistory, useConflicts, useMembers, useReadiness, useReport, useTasks, useValidation } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
-import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
+import { ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
 import LifecycleCard from "../components/LifecycleCard";
 import TasksTab from "../components/TasksTab";
@@ -240,7 +240,6 @@ function RequestDetailsView({ id }: { id: string }) {
                   notify={(kind, text) => setFlash({ kind, text })}
                 />
                 {!["COMPLETED", "CANCELLED"].includes(live.status) && <ConflictsCard state={conflicts.state} retry={conflicts.retry} />}
-                <ApproversCard ctx={ctx} />
                 <ParticipantsCard ctx={ctx} />
                 {/* Only an assigned, eligible approver with a pending decision gets controls. */}
                 <DecisionPanel
