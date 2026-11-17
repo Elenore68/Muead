@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { config } from "../config";
 import { ApiClientError, errorMessage } from "../api/client";
 import { getRequest, listAttachments, type ApiStatus, type Attachment, type RequestDetail } from "../api/requests";
-import { formatDate, formatDateTime, priorityLabel, statusLabel } from "../api/labels";
+import { formatDate, formatDateTime, priorityLabel, stageLabel } from "../api/labels";
 import { requests as mockRequests } from "./mock";
 import type { RequestFormValues } from "../components/RequestFields";
 
@@ -73,7 +73,8 @@ const fromApi = (r: RequestDetail): RequestView => {
     description: r.description,
     category: r.category,
     priority: priorityLabel(r.priority),
-    status: statusLabel(r.status),
+    // The exact stage (Readiness, Validation...). Lists and the Dashboard still group those under "In Progress".
+    status: stageLabel(r.status),
     owner: { id: r.owner.id, name: r.owner.displayName, initials: r.owner.initials },
     targetDate: r.schedule?.start ? formatDate(r.schedule.start) : null,
     createdOn: formatDateTime(r.createdAt),
