@@ -2,10 +2,11 @@ import { QueryCommand, UpdateCommand } from "@aws-sdk/lib-dynamodb";
 import { ulid } from "ulid";
 import { initialsOf } from "../lib/auth";
 import { auditItem } from "../lib/audit";
-import { batchGet, ddb, itemKey, queryPage, TABLE, transact, txConditionFailed, type Item } from "../lib/db";
+import { batchGet, ddb, itemKey, queryPage, TABLE, transact, txConditionFailed, type Item, type TransactItem } from "../lib/db";
 import { ApiError, badRequest, conflict } from "../lib/errors";
 import { assertTokenPartition, decodeToken, encodeToken, json, parseLimit, router, type Ctx } from "../lib/http";
 import { availableActions, parseCancelBody, parseTransitionBody, transitionAttrs, validateCancel, validateTransition } from "../lib/lifecycle";
+import { listItems, resolvedChecks, templatePuts, validateReadinessGate } from "../lib/readiness";
 import { assertEdit, assertView, buildMember, memberRequests, type ActivityRole } from "../lib/members";
 import {
   EDITABLE_STATUSES,
@@ -286,7 +287,7 @@ const withChanges = (r: Item, changes: Item): Item => {
 };
 
 /** One transaction: the request (version + status conditions), its audit entry and the status counters. */
-const changeStatus = async (p: { r: Item; to: Status; caller: Ctx["caller"]; auditRole: string; extra: Item; reason?: string }) => {
+const changeStatus = async (p: { r: Item; to: Status; caller: Ctx["caller"]; auditRole: string; extra: Item; reason?: string; more?: TransactItem[] }) => {
   const { r, to, caller } = p;
   const now = new Date().toISOString();
   const next = withChanges(r, { status: to, ...transitionAttrs(to, now, caller.userId, p.reason) });
@@ -312,9 +313,10 @@ const changeStatus = async (p: { r: Item; to: Status; caller: Ctx["caller"]; aud
         },
       },
       ...statsOnStatusChange(r.status, to),
+      ...(p.more ?? []),
     ]);
   } catch (e) {
-    if (txConditionFailed(e, 0)) throw conflict("CONCURRENT_UPDATE", "The request was changed by someone else. Reload and try again.");
+    if (txConditionFailed(e)) throw conflict("CONCURRENT_UPDATE", "The request or its readiness checklist changed. Reload and try again.");
     throw e;
   }
   return json(200, { requestId: r.id, status: to, previousStatus: r.status, version: next.version });
@@ -327,7 +329,17 @@ const transition = async ({ caller, path, body }: Ctx) => {
   const access = await assertView(r, caller, { consistent: true });
   validateTransition({ canEdit: access.canEdit, request: r, to });
   if (version !== r.version) throw conflict("VERSION_CONFLICT", "The request was changed by someone else. Reload and try again.");
-  return changeStatus({ r, to, caller, auditRole: access.auditRole, extra: {} });
+  const more: TransactItem[] = [];
+  if (to === "READINESS") {
+    // The checklist is copied onto the request in the same transaction that opens the Readiness stage.
+    more.push(...templatePuts(r.id, new Date().toISOString()));
+  } else if (to === "IN_PROGRESS") {
+    // Gate: every checklist item must be done or not applicable, and still be so when the transaction commits.
+    const items = await listItems(r.id, true);
+    validateReadinessGate(items);
+    more.push(...resolvedChecks(items));
+  }
+  return changeStatus({ r, to, caller, auditRole: access.auditRole, extra: {}, more });
 };
 
 /* POST /requests/{id}/cancel  { reason, version } */

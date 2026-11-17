@@ -678,3 +678,11 @@ These rules apply to every event:
 - `DELETE /v1/requests/{requestId}/tasks/{taskId}` -> `204` (owner/admin).
 - Task: `{ id, title, description, status, assignee: {id, displayName, initials}, dueDate, overdue, createdBy, createdAt, updatedAt, completedAt, version }`. `overdue` is true for an unfinished task whose due date is before today (UTC).
 - Audit actions: `TASK_ASSIGNED`, `TASK_COMPLETED`, `TASK_UPDATED`, `TASK_DELETED`, `MEMBER_UPDATED`.
+
+## 16. TASK 08: readiness checklist (implemented)
+- `GET /v1/requests/{requestId}/readiness` -> `{ items: Item[], progress: { total, resolved, done, percent }, requestStatus, started }`. `started` is false until the request enters READINESS. Any member or admin.
+- `PATCH /v1/requests/{requestId}/readiness/{itemId}` body `{ version, state: PENDING|DONE|NOT_APPLICABLE, note? (max 500; required for NOT_APPLICABLE) }`. Owner, admin or participant, only while the request is READINESS (`409 INVALID_STATE` otherwise). `409 VERSION_CONFLICT` on a stale version.
+- `POST /v1/requests/{requestId}/readiness` body `{ group, title }` adds a custom item (owner/admin, max 30, `409 ITEM_LIMIT`). `DELETE .../readiness/{itemId}` deletes a custom item (`409 TEMPLATE_ITEM` for template items).
+- Item: `{ id, group, title, custom, state, note, updatedBy, updatedAt, version }`. Groups: BACKUP, ACCESS, FIREWALL_CONNECTIVITY, TEAM_AVAILABILITY, APP_DEPENDENCIES, DOCUMENTATION.
+- `POST /v1/requests/{requestId}/transition` to READINESS creates the six template items; to IN_PROGRESS returns `409 READINESS_INCOMPLETE` (details list the pending item ids) unless every item is DONE or NOT_APPLICABLE.
+- Audit actions: `READINESS_UPDATED`, `READINESS_ITEM_ADDED`, `READINESS_ITEM_DELETED`.

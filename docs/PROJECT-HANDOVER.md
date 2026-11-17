@@ -601,6 +601,15 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 - **Checks run:** backend type check, 112 / 112 tests, `cdk synth` (new Tasks Lambda, 6 new routes); frontend 73 / 73 tests and build. Not run against real AWS.
 - **Not done:** task progress on the Dashboard (needs an aggregate across requests and a decision on "mine" vs "all"); reminders for due tasks (needs EventBridge, TASK 14).
 
+### 14.5 TASK 08 as implemented (branch `task-08-readiness-checklist`)
+- **Template (decision):** the six SOW groups, one default item each (Backup, Access, Firewall and connectivity, Team availability, Application dependencies, Documentation), wording in `backend/src/lib/readiness.ts`. It is copied onto the request in the same transaction that moves it Scheduled → Readiness, so later template edits never change running requests.
+- **Items:** state `PENDING`, `DONE` or `NOT_APPLICABLE` (a reason is required). The owner or an admin can add custom items (max 30) and delete them; template items cannot be deleted.
+- **Who updates (decision):** owner, admin and participants (SOW: "participants update items"). Approvers only read. Items change only while the request is in Readiness.
+- **Gate:** Readiness → In Progress is refused with `409 READINESS_INCOMPLETE` while any item is pending; the transaction re-checks every item so a concurrent un-check cannot slip through.
+- **Notifications:** every update writes `READINESS_UPDATED`; the owner is told (the existing rule), never the person who made it.
+- **API:** `GET/POST /v1/requests/{id}/readiness`, `PATCH/DELETE /v1/requests/{id}/readiness/{itemId}`. **Frontend:** a Readiness tab (live mode only).
+- **Checks run:** backend type check, 129 / 129 tests, `cdk synth`; frontend 85 / 85 tests and build. Not run against real AWS.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -608,7 +617,7 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 |---|---|---|---|---|---|
 | **06 (A)** | **Request lifecycle and complete request form. DONE locally on branch `task-06-request-lifecycle` (not committed, not pushed).** See section 14.3. | 4.2, 4.4 | — | — | Rules chosen for the open points are listed in 14.3; confirm them with the owner |
 | 07 (B) | Participation and tasks. **DONE locally on branch `task-07-participation-and-tasks`.** See section 14.4. | 4.3, 4.4 | — | — | Rules chosen for the open points are in 14.4; Dashboard task progress is not built |
-| 08 (C) | Readiness checklist | 4.6 | Template and per-request items; participant updates; gate before In Progress | 06 | Template content; who may mark items |
+| 08 (C) | Readiness checklist. **DONE locally on branch `task-08-readiness-checklist`.** See section 14.5. | 4.6 | — | — | Template wording and who may mark items were decided in 14.5; confirm with the owner |
 | 09 (D) | Maintenance execution tracking | 4.7 (heading only) | Progress notes, issues, Activity tab | 06, 07 | **Everything**: the SOW has no criteria |
 | 10 (E) | Validation and final report and closure | 4.9, 4.10 (heading only) | Validation per domain, remaining issues, final report, closing | 06, 09 | Closure rules and report contents |
 | 11 (F) | AI activity summary | 4.8, 5.7 | Bedrock summary, review before saving, stored in S3, enable the "Generate Summary" button | 07, 09, 10 | Model, language, who the "responsible employee" is |

@@ -3,6 +3,7 @@ import { config } from "../config";
 import { getApprovalHistory } from "../api/approvals";
 import { listMembers } from "../api/members";
 import { listTasks } from "../api/tasks";
+import { getReadiness } from "../api/readiness";
 import { useResource } from "./useResource";
 
 /** Members of a request (live mode only; mock mode has no membership data). */
@@ -20,5 +21,11 @@ export function useApprovalHistory(requestId: string) {
 /** Tasks of a request (live mode only). */
 export function useTasks(requestId: string, enabled = true) {
   const load = useCallback((signal: AbortSignal) => listTasks(requestId, signal), [requestId]);
+  return useResource(load, config.apiEnabled && enabled);
+}
+
+/** Readiness checklist of a request (live mode only). */
+export function useReadiness(requestId: string, enabled = true) {
+  const load = useCallback((signal: AbortSignal) => getReadiness(requestId, signal), [requestId]);
   return useResource(load, config.apiEnabled && enabled);
 }

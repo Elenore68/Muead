@@ -105,6 +105,11 @@ describe("POST /requests/{id}/transition", () => {
       const tx = db.transactions().at(-1)!;
       const written = (Object.values(tx.find((t: any) => t.Put?.Item?.SK === "META")) [0] as any).Item;
       db.put(written);
+      // Entering READINESS copies the checklist onto the request; the team then completes it before the next step.
+      for (const t of tx) {
+        const it = (t as any).Put?.Item;
+        if (it?.SK?.startsWith("READY#")) db.put({ ...it, state: "DONE" });
+      }
     }
     const final = db.get(`REQ#${RID}`, "META")!;
     assert.equal(final.status, "COMPLETED");
