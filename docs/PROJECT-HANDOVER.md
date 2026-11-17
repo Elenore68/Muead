@@ -3,12 +3,12 @@
 **Audience:** a developer who has never seen this project.
 **Repository folder (original machine):** `D:\Meaed\Muead`. **GitHub:** `Elenore68/Muead`.
 **Latest completed work:** TASK 01 to 13. TASK 01 to 07 are merged into `main` on GitHub. TASK 08 to 13 are on stacked branches (`task-08-readiness-checklist` … `task-13-team-settings-reports`), each built on the one before; merge them in order (sections 14.5 to 14.10). Sections 7 and 12 describe the state up to TASK 05 and were not rewritten.
-**Deployment:** **nothing has ever been deployed to AWS.**
+**Deployment:** the `Muead-dev` stack was deployed to AWS (us-east-1) on 2026-11-17 and passed a 28-step end-to-end smoke test with two real Cognito users (section 14.11).
 
 > ## Start here
 > **"Do not start coding immediately. First read this handover document, inspect the repository and Git status, review the SOW and design reference, and understand the completed tasks. Then ask the project owner to confirm the next task before making changes."**
 >
-> - **Recommended next task:** **TASK 14: Deployment and operations** (section 14.2), after merging the TASK 08 to 13 branches in order and getting the owner's approval to deploy. **Nothing has been deployed and nothing has been tested against real AWS.**
+> - **Recommended next task:** **TASK 14: Deployment and operations** (section 14.2), after merging the TASK 08 to 13 branches in order and getting the owner's approval to deploy. **The dev stack is deployed (14.11); email, AI summaries, hosting, alarms and reminders are not.**
 > - **Decisions to confirm:** the product decisions in 14.1 were confirmed by the project owner. The rules chosen for TASK 06 to 13 (sections 14.3 to 14.10) were decided during implementation because the SOW is silent; ask the owner to confirm them.
 
 Every Git fact in this document was checked with Git commands when it was written. Re-check before relying on it (section 17, step 3).
@@ -657,6 +657,15 @@ No new backend routes: the pages use `GET /users`, `GET /requests`, `PATCH /me` 
 - **Reports (decision on formats):** finished requests (Completed or Cancelled) with search and paging, a link that opens the request's **Report** tab, and a **CSV export** of the list. Cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe so spreadsheets never run them as formulas; the file has a UTF-8 BOM so Arabic opens correctly. One final report can be **printed or saved as PDF** from the Report tab (browser print, print styles hide the menus). No server-side PDF.
 - **Not done:** reports across many requests (charts, per-team statistics), a PDF generated on the server, a notification history page, a profile picture.
 - **Checks run:** frontend 135 / 135 tests and build; backend unchanged (191 / 191).
+
+### 14.11 TASK 14: deployment (done for `dev`, 2026-11-17)
+- **What:** `cdk deploy` of `Muead-dev` into one AWS account (the one behind the `signin` profile), region `us-east-1`; the account already held other stacks and an existing CDK bootstrap, so `cdk bootstrap` was not needed. Resources are all prefixed `muead-dev-`.
+- **Public identifiers** (not secrets; also printed by `cdk deploy`): API `https://5s19fiqr8g.execute-api.us-east-1.amazonaws.com/v1/`, user pool `us-east-1_Ob74tMeX5`, app client `7tbib7phcl7dl7umjpdf8tpt3j`, table `muead-dev-main`.
+- **Verified against real AWS** by `backend/scripts/e2e-smoke.mjs` (28 steps, all passed): SRP sign-in, profile creation, create with all SOW fields, directory search without emails, approver assignment, submit, inbox, **DynamoDB stream → notifier → bell notifications**, approval, schedule and conflicts, Scheduled → Readiness (checklist created), the readiness gate, tasks, activity log, Validation, the closing gate, closing with the final report, the report read by the approver, AI disabled (503) with a written summary saved, dashboard and lists. This confirms the transactions, condition expressions, indexes, authorizer and stream filter on the real services.
+- **Not covered by the smoke test:** file upload to S3 with pre-signed URLs from a browser (CORS), participation confirmation with a third user, ALL approval policy with several approvers, email, AI, and the UI itself in a browser against the real API.
+- **Test data left behind:** two users `e2e.owner@muead-test.example` and `e2e.approver@muead-test.example` (passwords were not stored in the repository) and one completed request. Delete them before real use.
+- **Runbook:** `docs/DEPLOYMENT.md`. Local connection: `frontend/.env.local` (git-ignored).
+- **Still open:** hosting (Amplify) and the production CORS origin, SES and Bedrock decisions, CloudWatch alarms, a dead-letter queue, EventBridge reminders, MFA in the UI, deploying with a named IAM user instead of the account root (the `signin` session used for this deploy was the root user).
 
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
