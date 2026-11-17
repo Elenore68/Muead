@@ -9,7 +9,7 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
-import { useActivityLog, useApprovalHistory, useMembers, useReadiness, useReport, useTasks, useValidation } from "../data/useActivity";
+import { useActivityLog, useApprovalHistory, useConflicts, useMembers, useReadiness, useReport, useTasks, useValidation } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
@@ -19,6 +19,7 @@ import ReadinessTab from "../components/ReadinessTab";
 import ActivityTab from "../components/ActivityTab";
 import ValidationTab from "../components/ValidationTab";
 import ReportTab from "../components/ReportTab";
+import ConflictsCard from "../components/ConflictsCard";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
@@ -46,6 +47,7 @@ function RequestDetailsView({ id }: { id: string }) {
   const readiness = useReadiness(id, tab === "Readiness");
   const activityLog = useActivityLog(id, tab === "Activity");
   const validation = useValidation(id, tab === "Validation");
+  const conflicts = useConflicts(id);
   const report = useReport(id, tab === "Report" && state.kind === "ready" && state.data.live?.status === "COMPLETED");
   const { profile } = useAuth();
   const [flash, setFlash] = useState<Flash>(null);
@@ -59,7 +61,8 @@ function RequestDetailsView({ id }: { id: string }) {
     activityLog.refresh();
     validation.refresh();
     report.refresh();
-  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh, validation.refresh, report.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+    conflicts.refresh();
+  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh, validation.refresh, report.refresh, conflicts.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -233,6 +236,7 @@ function RequestDetailsView({ id }: { id: string }) {
                   onChanged={refreshAll}
                   notify={(kind, text) => setFlash({ kind, text })}
                 />
+                {!["COMPLETED", "CANCELLED"].includes(live.status) && <ConflictsCard state={conflicts.state} retry={conflicts.retry} />}
                 <ApproversCard ctx={ctx} />
                 <ParticipantsCard ctx={ctx} />
                 {/* Only an assigned, eligible approver with a pending decision gets controls. */}

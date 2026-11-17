@@ -155,6 +155,7 @@ export class MueadStack extends cdk.Stack {
     const fnActivity = mkFn("Activity", "activity.ts");
     const fnReadiness = mkFn("Readiness", "readiness.ts");
     const fnSummary = mkFn("Summary", "summary.ts");
+    const fnSchedule = mkFn("Schedule", "schedule.ts");
     const fnNotifications = mkFn("Notifications", "notifications.ts");
     const fnNotifier = mkFn("Notifier", "notifier.ts");
 
@@ -210,6 +211,7 @@ export class MueadStack extends cdk.Stack {
     table.grantReadWriteData(fnMembers);
     table.grantReadWriteData(fnApprovals);
     table.grantReadWriteData(fnTasks);
+    table.grantReadData(fnSchedule); // read-only: it never writes
     table.grantReadWriteData(fnSummary);
     table.grantReadWriteData(fnValidation);
     table.grantReadWriteData(fnActivity);
@@ -333,6 +335,10 @@ export class MueadStack extends cdk.Stack {
     wire(fnSummary, [
       { method: "POST", path: "requests/{requestId}/report/summary/generate" },
       { method: "PUT", path: "requests/{requestId}/report/summary" },
+    ]);
+    wire(fnSchedule, [
+      { method: "GET", path: "schedule" },
+      { method: "GET", path: "requests/{requestId}/conflicts" },
     ]);
     wire(fnTasks, [
       { method: "GET", path: "requests/{requestId}/tasks" },

@@ -640,6 +640,16 @@ SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are 
 - **Not done:** storing the summary in S3 (SOW 5.7 mentions it); it is stored in the table with the report.
 - **Checks run:** backend 174 / 174 tests and `cdk synth`; frontend 110 / 110 tests and build.
 
+### 14.9 TASK 12 as implemented (branch `task-12-scheduling-and-conflicts`, stacked on 11)
+The SOW does not define a conflict, so this is a **decision to confirm with the owner**. Conflicts are **warnings only**; nothing is blocked.
+- **Definition:** two planned or running activities (Pending Approval to Validation; not Draft, Rejected, Cancelled, Completed) conflict when their time windows overlap **and** either (a) they are in the same environment and share an affected system (names compared ignoring case and spaces), or (b) the same person is an active owner or participant of both (approvers do not count). A window is start..end, or the 24 hours after the start when there is no end. Touching windows do not overlap.
+- **Per request:** `GET /v1/requests/{id}/conflicts` (also for drafts, so a clash is visible before submitting). A conflict with an activity the caller is not part of is **redacted**: no number, title, systems or names (only the time window and the kind of clash).
+- **Schedule:** `GET /v1/schedule?from=&to=` (max 62 days, default next 30). Admins see every activity; everyone else sees the activities they belong to. Each item has `conflictCount` computed against all planned activities, returned only as a count.
+- **Frontend:** a Schedule page (live mode only; mock mode keeps the placeholder) with a month switcher, activities grouped by day, conflict badges; a "Schedule conflicts" card on Request Details.
+- **Limitation:** activities are indexed by start month only. The previous month is also read, so activities running up to about a month are found; longer ones can be missed. At most 200 activities are compared per call (`truncated` is returned).
+- **Not done:** Dashboard alerts for conflicts (kept out so the Dashboard and its mock mode stay unchanged), a calendar grid view, reminders (TASK 14).
+- **Checks run:** backend 191 / 191 tests and `cdk synth` (the new Schedule Lambda is read-only); frontend 120 / 120 tests and build.
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -651,7 +661,7 @@ SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are 
 | 09 (D) | Maintenance execution tracking. **DONE locally on branch `task-09-execution-tracking` (built on 08).** See section 14.6. | 4.7 (heading only) | — | — | The SOW has no criteria: everything in 14.6 is a decision to confirm with the owner |
 | 10 (E) | Validation, final report and closure. **DONE locally on branch `task-10-validation-and-final-report` (stacked on 09).** See section 14.7. | 4.9, 4.10 (heading only) | — | — | SOW 4.10 has no criteria: the closure rules in 14.7 are decisions to confirm with the owner |
 | 11 (F) | AI activity summary. **DONE locally on branch `task-11-ai-summary` (stacked on 10), DISABLED by default.** See section 14.8. | 4.8, 5.7 | — | 07, 09, 10 | Model id and who may enable it (14.8) |
-| 12 (G) | Scheduling and conflicts | 4.4 | Schedule page, conflict detection, Dashboard alerts; Dashboard "mine" view counts only owned requests | 06 | What counts as a conflict |
+| 12 (G) | Scheduling and conflicts. **DONE locally on branch `task-12-scheduling-and-conflicts` (stacked on 11).** See section 14.9. | 4.4 | — | 06 | The conflict definition in 14.9 is a decision to confirm; Dashboard conflict alerts are not built |
 | 13 (H) | Team, Settings and Reports pages | 4.4 | Team directory page, Settings (email preference), Reports and history | Reports: 10, 11 | Which reports and export formats |
 | 14 (I) | Deployment and operations | 5.1, 5.5, 5.6, 5.9 | First deploy (by the owner), test users, end-to-end test with two users, Amplify plus CORS update, EventBridge reminders, Step Functions decision, enable SES, alarms, dead-letter queue, MFA in the UI, token-storage review | — (reminders need 06 and 07) | When to deploy; SES sender |
 
