@@ -25,6 +25,8 @@ export type NotificationType =
   | "REQUEST_REJECTED"
   | "REQUEST_WITHDRAWN"
   | "PARTICIPATION_RESPONDED"
+  | "ISSUE_REPORTED"
+  | "ISSUE_RESOLVED"
   | "REQUEST_STATUS_CHANGED"
   | "TASK_ASSIGNED"
   | "TASK_COMPLETED"
@@ -162,6 +164,16 @@ export const planNotifications = (audit: Item, request: RequestLite, members: Me
       break;
     case "PARTICIPATION_DECLINED":
       add([owner], "PARTICIPATION_RESPONDED", `${actor} declined ${request.requestNo}`, `${actor} declined to participate in ${ref}. Reassign their work or remove them.`);
+      break;
+
+    case "ISSUE_REPORTED": {
+      const sev = audit.severity === "HIGH" ? "High-severity issue" : "Issue";
+      add([owner, ...byRole("PARTICIPANT")], "ISSUE_REPORTED", `${sev} reported: ${request.requestNo}`, `${actor} reported an issue on ${ref}. Open the Activity tab for details.`);
+      break;
+    }
+    case "ISSUE_RESOLVED":
+      // The person who reported it and the owner.
+      add([owner, audit.reportedBy], "ISSUE_RESOLVED", `Issue resolved: ${request.requestNo}`, `${actor} resolved an issue on ${ref}.`);
       break;
 
     /* ---------------- reserved: emitted by features that are not built yet ---------------- */

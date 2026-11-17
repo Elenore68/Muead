@@ -94,3 +94,23 @@ export const advanceLabel = (to: ApiStatus): string =>
 export const participationLabel = (p: string | null | undefined): string | null =>
   p ? ({ PENDING: "Awaiting answer", CONFIRMED: "Confirmed", DECLINED: "Declined" } as Record<string, string>)[p] ?? p : null;
 export const taskStatusLabel = (s: string): string => ({ TODO: "To do", IN_PROGRESS: "In progress", DONE: "Done" } as Record<string, string>)[s] ?? s;
+
+/* ---------- TASK 08: readiness checklist ---------- */
+export const checklistGroupLabel = (g: string): string =>
+  ({
+    BACKUP: "Backup",
+    ACCESS: "Access",
+    FIREWALL_CONNECTIVITY: "Firewall and connectivity",
+    TEAM_AVAILABILITY: "Team availability",
+    APP_DEPENDENCIES: "Application dependencies",
+    DOCUMENTATION: "Documentation",
+  } as Record<string, string>)[g] ?? g;
+export const itemStateLabel = (s: string): string => ({ PENDING: "Pending", DONE: "Done", NOT_APPLICABLE: "Not applicable" } as Record<string, string>)[s] ?? s;
+
+/* ---------- TASK 09: activity log ---------- */
+export const severityLabel = (s: string | null): string => (s ? s[0] + s.slice(1).toLowerCase() : "");
+
+/* ---------- TASK 10: validation ---------- */
+export const domainLabel = (d: string): string =>
+  ({ APPLICATION: "Application", DATABASE: "Database", OS: "Operating system", INFRASTRUCTURE: "Infrastructure" } as Record<string, string>)[d] ?? d;
+export const resultLabel = (r: string): string => ({ PENDING: "Pending", PASSED: "Passed", FAILED: "Failed", NOT_APPLICABLE: "Not applicable" } as Record<string, string>)[r] ?? r;

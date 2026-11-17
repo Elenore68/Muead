@@ -2,14 +2,14 @@
 
 **Audience:** a developer who has never seen this project.
 **Repository folder (original machine):** `D:\Meaed\Muead`. **GitHub:** `Elenore68/Muead`.
-**Latest completed work:** branch `task-05-notifications` on GitHub: TASK 05 commit `87482934380fe33978aae2000aa0da5b16efa3a8`, followed by the commit that adds this document (see section 12).
+**Latest completed work:** TASK 01 to 13. TASK 01 to 07 are merged into `main` on GitHub. TASK 08 to 13 are on stacked branches (`task-08-readiness-checklist` … `task-13-team-settings-reports`), each built on the one before; merge them in order (sections 14.5 to 14.10). Sections 7 and 12 describe the state up to TASK 05 and were not rewritten.
 **Deployment:** **nothing has ever been deployed to AWS.**
 
 > ## Start here
 > **"Do not start coding immediately. First read this handover document, inspect the repository and Git status, review the SOW and design reference, and understand the completed tasks. Then ask the project owner to confirm the next task before making changes."**
 >
-> - **Recommended next task:** **TASK 06: Request Lifecycle and Complete Request Form.** It has **NOT started** and has **NOT been implemented**.
-> - **Already decided:** the product decisions for it are confirmed by the project owner in section 14.1, so you don't need to ask again.
+> - **Recommended next task:** **TASK 14: Deployment and operations** (section 14.2), after merging the TASK 08 to 13 branches in order and getting the owner's approval to deploy. **Nothing has been deployed and nothing has been tested against real AWS.**
+> - **Decisions to confirm:** the product decisions in 14.1 were confirmed by the project owner. The rules chosen for TASK 06 to 13 (sections 14.3 to 14.10) were decided during implementation because the SOW is silent; ask the owner to confirm them.
 
 Every Git fact in this document was checked with Git commands when it was written. Re-check before relying on it (section 17, step 3).
 
@@ -68,10 +68,10 @@ Every Git fact in this document was checked with Git commands when it was writte
 3. ✅ The owner adds participants and approvers, and chooses the approval policy.
 4. ✅ The owner submits it for approval. Approvers receive an in-app notification.
 5. ✅ Approvers approve or reject, with comments and full history. The owner can withdraw a pending request.
-6. ⏳ Schedule the activity, assign tasks, complete the readiness checklist.
-7. ⏳ Execute the maintenance and track progress.
-8. ⏳ Validate systems after maintenance and generate an AI summary.
-9. ⏳ Produce a final report and close the activity.
+6. ✅ Schedule the activity (with conflict warnings), assign tasks, complete the readiness checklist.
+7. ✅ Execute the maintenance and track progress (notes and issues).
+8. ✅ Validate systems after maintenance; the AI summary is built but disabled.
+9. ✅ Produce a final report and close the activity.
 
 ---
 
@@ -601,6 +601,63 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 - **Checks run:** backend type check, 112 / 112 tests, `cdk synth` (new Tasks Lambda, 6 new routes); frontend 73 / 73 tests and build. Not run against real AWS.
 - **Not done:** task progress on the Dashboard (needs an aggregate across requests and a decision on "mine" vs "all"); reminders for due tasks (needs EventBridge, TASK 14).
 
+### 14.5 TASK 08 as implemented (branch `task-08-readiness-checklist`)
+- **Template (decision):** the six SOW groups, one default item each (Backup, Access, Firewall and connectivity, Team availability, Application dependencies, Documentation), wording in `backend/src/lib/readiness.ts`. It is copied onto the request in the same transaction that moves it Scheduled → Readiness, so later template edits never change running requests.
+- **Items:** state `PENDING`, `DONE` or `NOT_APPLICABLE` (a reason is required). The owner or an admin can add custom items (max 30) and delete them; template items cannot be deleted.
+- **Who updates (decision):** owner, admin and participants (SOW: "participants update items"). Approvers only read. Items change only while the request is in Readiness.
+- **Gate:** Readiness → In Progress is refused with `409 READINESS_INCOMPLETE` while any item is pending; the transaction re-checks every item so a concurrent un-check cannot slip through.
+- **Notifications:** every update writes `READINESS_UPDATED`; the owner is told (the existing rule), never the person who made it.
+- **API:** `GET/POST /v1/requests/{id}/readiness`, `PATCH/DELETE /v1/requests/{id}/readiness/{itemId}`. **Frontend:** a Readiness tab (live mode only).
+- **Checks run:** backend type check, 129 / 129 tests, `cdk synth`; frontend 85 / 85 tests and build. Not run against real AWS.
+
+### 14.6 TASK 09 as implemented (branch `task-09-execution-tracking`, stacked on 08)
+SOW 4.7 is only a heading, so these are **decisions to confirm with the owner**:
+- The Activity tab is an append-only log of **progress notes** and **issues** for the request. Entries are never edited or deleted.
+- An issue has a severity (Low, Medium, High) and is Open until someone resolves it with a description. A resolved issue can be reopened.
+- Owner, admin and participants write and resolve; approvers only read. Entries can be added while the request is In Progress or in Validation; everything stays readable afterwards.
+- Notifications: a new issue notifies the owner and participants; a resolution notifies the owner and the person who reported it. Notes notify nobody. The text of an entry is never copied into audit entries or notifications.
+- API: `GET/POST /v1/requests/{id}/activity`, `PATCH /v1/requests/{id}/activity/{entryId}`. Max 500 entries per request.
+- Checks run: backend 142 / 142 tests and `cdk synth`; frontend 94 / 94 tests and build.
+
+### 14.7 TASK 10 as implemented (branch `task-10-validation-and-final-report`, stacked on 09)
+SOW 4.9 names the domains; SOW 4.10 is only a heading, so the closure rules are **decisions to confirm with the owner**:
+- **Validation:** four checks (Application, Database, Operating system, Infrastructure), created in the same transaction that moves the request to Validation. Each ends as Passed, Failed (note required) or Not applicable (reason required). Owner, admin and participants record results, only while the request is in Validation; approvers read.
+- **Closing (Validation → Completed):** every check needs a result and a closing summary (max 5000). If a check failed or an issue is still open, the "remaining issues" text is also required. The transaction re-checks every result, so a concurrent change cannot slip through. Owner or admin only.
+- **Final report:** written once in the same transaction (`REPORT#FINAL`, never changed). It is a snapshot: request details, people, approval, timeline, tasks, readiness, validation, issues (open first, max 50, texts shortened to fit DynamoDB's 400 KB item limit). `GET /v1/requests/{id}/report` returns it (404 until the request is completed).
+- **Notifications:** closing notifies every member except the actor through the normal status-change notice. The last validation result also writes `VALIDATION_COMPLETED` (owner and participants).
+- **Frontend:** Validation and Report tabs (live mode only) and a closing dialog on the "Mark as completed" button.
+- **Checks run:** backend 160 / 160 tests and `cdk synth`; frontend 105 / 105 tests and build. Not run against real AWS.
+- **Not done:** PDF/export of the report (TASK 13); AI summary (TASK 11).
+
+### 14.8 TASK 11 as implemented (branch `task-11-ai-summary`, stacked on 10)
+- **Disabled by default, like email.** `backend/infra/config.ts` → `ai: { enabled: false, modelId: "" }`. While disabled the stack grants no `bedrock:*` permission and no Bedrock client is created; the generate call answers `503 AI_DISABLED` and people can still write the summary by hand. To enable later (needs the owner's approval): enable a Bedrock model for the account, set both fields, deploy. The permission is limited to `bedrock:InvokeModel` on that one model (synth verified both ways). Some models are reachable only through an inference profile; if so, the policy resource must be adjusted when enabling.
+- **Flow (decisions):** `POST /v1/requests/{id}/report/summary/generate {language: en|ar}` returns a **draft** from the stored final report and saves nothing. `PUT /v1/requests/{id}/report/summary {text, aiAssisted, language}` saves the text the person reviewed. Owner or admin only; the request must be Completed.
+- **"Responsible employee" (decision):** whoever saves the reviewed summary. Their name and the time are stored with it (`aiSummary` on the report).
+- **Safety:** the report text is user-written, so it is sent to the model as delimited data and the system prompt says to ignore instructions inside it; the client cannot choose the model; model errors become `502 AI_UNAVAILABLE` without details; the text is not copied into audit entries.
+- **Dependencies:** `@aws-sdk/client-bedrock-runtime` 3.1167.0 (same version as the other AWS SDK clients).
+- **Frontend:** an "Activity summary" panel in the Report tab: language, Generate, edit, Save, Discard; the saved summary shows who reviewed it and whether AI helped.
+- **Not verified:** a real Bedrock call (nothing is deployed). Prompt quality and the Arabic output need a human check once enabled.
+- **Not done:** storing the summary in S3 (SOW 5.7 mentions it); it is stored in the table with the report.
+- **Checks run:** backend 174 / 174 tests and `cdk synth`; frontend 110 / 110 tests and build.
+
+### 14.9 TASK 12 as implemented (branch `task-12-scheduling-and-conflicts`, stacked on 11)
+The SOW does not define a conflict, so this is a **decision to confirm with the owner**. Conflicts are **warnings only**; nothing is blocked.
+- **Definition:** two planned or running activities (Pending Approval to Validation; not Draft, Rejected, Cancelled, Completed) conflict when their time windows overlap **and** either (a) they are in the same environment and share an affected system (names compared ignoring case and spaces), or (b) the same person is an active owner or participant of both (approvers do not count). A window is start..end, or the 24 hours after the start when there is no end. Touching windows do not overlap.
+- **Per request:** `GET /v1/requests/{id}/conflicts` (also for drafts, so a clash is visible before submitting). A conflict with an activity the caller is not part of is **redacted**: no number, title, systems or names (only the time window and the kind of clash).
+- **Schedule:** `GET /v1/schedule?from=&to=` (max 62 days, default next 30). Admins see every activity; everyone else sees the activities they belong to. Each item has `conflictCount` computed against all planned activities, returned only as a count.
+- **Frontend:** a Schedule page (live mode only; mock mode keeps the placeholder) with a month switcher, activities grouped by day, conflict badges; a "Schedule conflicts" card on Request Details.
+- **Limitation:** activities are indexed by start month only. The previous month is also read, so activities running up to about a month are found; longer ones can be missed. At most 200 activities are compared per call (`truncated` is returned).
+- **Not done:** Dashboard alerts for conflicts (kept out so the Dashboard and its mock mode stay unchanged), a calendar grid view, reminders (TASK 14).
+- **Checks run:** backend 191 / 191 tests and `cdk synth` (the new Schedule Lambda is read-only); frontend 120 / 120 tests and build.
+
+### 14.10 TASK 13 as implemented (branch `task-13-team-settings-reports`, stacked on 12)
+No new backend routes: the pages use `GET /users`, `GET /requests`, `PATCH /me` and `GET /requests/{id}/report`. All three pages exist in live mode only; mock mode keeps its placeholders.
+- **Team:** a name search over the people directory (at least 2 letters, "can approve" filter). People appear after their first sign-in; no email addresses are shown.
+- **Settings:** change your display name and the email-notification preference (`PATCH /me`). The email address is read-only. Email is sent only when the platform has email turned on (still disabled).
+- **Reports (decision on formats):** finished requests (Completed or Cancelled) with search and paging, a link that opens the request's **Report** tab, and a **CSV export** of the list. Cells that start with `=`, `+`, `-` or `@` are prefixed with an apostrophe so spreadsheets never run them as formulas; the file has a UTF-8 BOM so Arabic opens correctly. One final report can be **printed or saved as PDF** from the Report tab (browser print, print styles hide the menus). No server-side PDF.
+- **Not done:** reports across many requests (charts, per-team statistics), a PDF generated on the server, a notification history page, a profile picture.
+- **Checks run:** frontend 135 / 135 tests and build; backend unchanged (191 / 191).
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 
@@ -608,12 +665,12 @@ Today `GET /reference-data` returns empty lists for these three fields; TASK 06 
 |---|---|---|---|---|---|
 | **06 (A)** | **Request lifecycle and complete request form. DONE locally on branch `task-06-request-lifecycle` (not committed, not pushed).** See section 14.3. | 4.2, 4.4 | — | — | Rules chosen for the open points are listed in 14.3; confirm them with the owner |
 | 07 (B) | Participation and tasks. **DONE locally on branch `task-07-participation-and-tasks`.** See section 14.4. | 4.3, 4.4 | — | — | Rules chosen for the open points are in 14.4; Dashboard task progress is not built |
-| 08 (C) | Readiness checklist | 4.6 | Template and per-request items; participant updates; gate before In Progress | 06 | Template content; who may mark items |
-| 09 (D) | Maintenance execution tracking | 4.7 (heading only) | Progress notes, issues, Activity tab | 06, 07 | **Everything**: the SOW has no criteria |
-| 10 (E) | Validation and final report and closure | 4.9, 4.10 (heading only) | Validation per domain, remaining issues, final report, closing | 06, 09 | Closure rules and report contents |
-| 11 (F) | AI activity summary | 4.8, 5.7 | Bedrock summary, review before saving, stored in S3, enable the "Generate Summary" button | 07, 09, 10 | Model, language, who the "responsible employee" is |
-| 12 (G) | Scheduling and conflicts | 4.4 | Schedule page, conflict detection, Dashboard alerts; Dashboard "mine" view counts only owned requests | 06 | What counts as a conflict |
-| 13 (H) | Team, Settings and Reports pages | 4.4 | Team directory page, Settings (email preference), Reports and history | Reports: 10, 11 | Which reports and export formats |
+| 08 (C) | Readiness checklist. **DONE locally on branch `task-08-readiness-checklist`.** See section 14.5. | 4.6 | — | — | Template wording and who may mark items were decided in 14.5; confirm with the owner |
+| 09 (D) | Maintenance execution tracking. **DONE locally on branch `task-09-execution-tracking` (built on 08).** See section 14.6. | 4.7 (heading only) | — | — | The SOW has no criteria: everything in 14.6 is a decision to confirm with the owner |
+| 10 (E) | Validation, final report and closure. **DONE locally on branch `task-10-validation-and-final-report` (stacked on 09).** See section 14.7. | 4.9, 4.10 (heading only) | — | — | SOW 4.10 has no criteria: the closure rules in 14.7 are decisions to confirm with the owner |
+| 11 (F) | AI activity summary. **DONE locally on branch `task-11-ai-summary` (stacked on 10), DISABLED by default.** See section 14.8. | 4.8, 5.7 | — | 07, 09, 10 | Model id and who may enable it (14.8) |
+| 12 (G) | Scheduling and conflicts. **DONE locally on branch `task-12-scheduling-and-conflicts` (stacked on 11).** See section 14.9. | 4.4 | — | 06 | The conflict definition in 14.9 is a decision to confirm; Dashboard conflict alerts are not built |
+| 13 (H) | Team, Settings and Reports pages. **DONE locally on branch `task-13-team-settings-reports` (stacked on 12).** See section 14.10. | 4.4 | — | 10, 11 | Report formats were decided in 14.10 (CSV list, print/PDF for one report) |
 | 14 (I) | Deployment and operations | 5.1, 5.5, 5.6, 5.9 | First deploy (by the owner), test users, end-to-end test with two users, Amplify plus CORS update, EventBridge reminders, Step Functions decision, enable SES, alarms, dead-letter queue, MFA in the UI, token-storage review | — (reminders need 06 and 07) | When to deploy; SES sender |
 
 **Suggested acceptance criteria for TASK 06:**

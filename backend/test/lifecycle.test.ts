@@ -98,13 +98,19 @@ describe("POST /requests/{id}/transition", () => {
     seedMember(OWNER, "OWNER");
     let version = 7;
     for (const to of steps) {
-      const res = await move(OWNER, { to, version });
+      const res = await requests(event({ method: "POST", resource: "/requests/{requestId}/transition", sub: OWNER, body: { to, version, summary: "All good" }, path: { requestId: RID } })).then(parse);
       assert.equal(res.status, 200, `${to}: ${JSON.stringify(res.body)}`);
       version = res.body.version;
       // The fake does not apply transactions: re-seed the request as the transaction wrote it.
       const tx = db.transactions().at(-1)!;
       const written = (Object.values(tx.find((t: any) => t.Put?.Item?.SK === "META")) [0] as any).Item;
       db.put(written);
+      // Entering READINESS copies the checklist onto the request; the team then completes it before the next step.
+      for (const t of tx) {
+        const it = (t as any).Put?.Item;
+        if (it?.SK?.startsWith("READY#")) db.put({ ...it, state: "DONE" });
+        if (it?.SK?.startsWith("VALID#")) db.put({ ...it, result: "PASSED" });
+      }
     }
     const final = db.get(`REQ#${RID}`, "META")!;
     assert.equal(final.status, "COMPLETED");

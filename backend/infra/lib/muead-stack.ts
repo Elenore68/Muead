@@ -151,9 +151,24 @@ export class MueadStack extends cdk.Stack {
     const fnMembers = mkFn("Members", "members.ts");
     const fnApprovals = mkFn("Approvals", "approvals.ts");
     const fnTasks = mkFn("Tasks", "tasks.ts");
+    const fnValidation = mkFn("Validation", "validation.ts");
+    const fnActivity = mkFn("Activity", "activity.ts");
+    const fnReadiness = mkFn("Readiness", "readiness.ts");
+    const fnSummary = mkFn("Summary", "summary.ts");
+    const fnSchedule = mkFn("Schedule", "schedule.ts");
     const fnNotifications = mkFn("Notifications", "notifications.ts");
     const fnNotifier = mkFn("Notifier", "notifier.ts");
 
+    // ---------- AI summary (TASK 11, SOW 4.8 / 5.7): disabled by default ----------
+    if (cfg.ai.enabled && !cfg.ai.modelId) throw new Error("config.ai.enabled requires config.ai.modelId (a Bedrock model enabled for the account)");
+    fnSummary.addEnvironment("AI_ENABLED", String(cfg.ai.enabled));
+    fnSummary.addEnvironment("AI_MODEL_ID", cfg.ai.enabled ? cfg.ai.modelId : "");
+    if (cfg.ai.enabled) {
+      // Least privilege: invoke only the configured model. Not granted while AI is disabled.
+      fnSummary.addToRolePolicy(
+        new iam.PolicyStatement({ actions: ["bedrock:InvokeModel"], resources: [`arn:aws:bedrock:${this.region}::foundation-model/${cfg.ai.modelId}`] }),
+      );
+    }
     // ---------- Notifications (TASK 05, SOW 4.3 / 4.4 / 5.5) ----------
     if (cfg.email.enabled && !cfg.email.fromAddress.includes("@")) {
       throw new Error("config.email.enabled requires config.email.fromAddress (an SES-verified sender)");
@@ -196,6 +211,11 @@ export class MueadStack extends cdk.Stack {
     table.grantReadWriteData(fnMembers);
     table.grantReadWriteData(fnApprovals);
     table.grantReadWriteData(fnTasks);
+    table.grantReadData(fnSchedule); // read-only: it never writes
+    table.grantReadWriteData(fnSummary);
+    table.grantReadWriteData(fnValidation);
+    table.grantReadWriteData(fnActivity);
+    table.grantReadWriteData(fnReadiness);
     table.grantReadWriteData(fnNotifications); // own notification items only (enforced by key in the handler)
     table.grantReadWriteData(fnNotifier); // reads request/members/profiles, writes notification items
     bucket.grantReadWrite(fnAttachments); // includes KMS use via the bucket key policy grant
@@ -295,6 +315,30 @@ export class MueadStack extends cdk.Stack {
       { method: "DELETE", path: "requests/{requestId}/members/{userId}" },
       { method: "PATCH", path: "requests/{requestId}/members/{userId}" },
       { method: "POST", path: "requests/{requestId}/participation" },
+    ]);
+    wire(fnReadiness, [
+      { method: "GET", path: "requests/{requestId}/readiness" },
+      { method: "POST", path: "requests/{requestId}/readiness" },
+      { method: "PATCH", path: "requests/{requestId}/readiness/{itemId}" },
+      { method: "DELETE", path: "requests/{requestId}/readiness/{itemId}" },
+    ]);
+    wire(fnActivity, [
+      { method: "GET", path: "requests/{requestId}/activity" },
+      { method: "POST", path: "requests/{requestId}/activity" },
+      { method: "PATCH", path: "requests/{requestId}/activity/{entryId}" },
+    ]);
+    wire(fnValidation, [
+      { method: "GET", path: "requests/{requestId}/validation" },
+      { method: "PATCH", path: "requests/{requestId}/validation/{domain}" },
+      { method: "GET", path: "requests/{requestId}/report" },
+    ]);
+    wire(fnSummary, [
+      { method: "POST", path: "requests/{requestId}/report/summary/generate" },
+      { method: "PUT", path: "requests/{requestId}/report/summary" },
+    ]);
+    wire(fnSchedule, [
+      { method: "GET", path: "schedule" },
+      { method: "GET", path: "requests/{requestId}/conflicts" },
     ]);
     wire(fnTasks, [
       { method: "GET", path: "requests/{requestId}/tasks" },

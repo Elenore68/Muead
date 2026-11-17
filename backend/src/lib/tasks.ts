@@ -1,5 +1,5 @@
 import { ulid } from "ulid";
-import { TABLE, type Item, type TransactItem } from "./db";
+import { queryAll, TABLE, type Item, type TransactItem } from "./db";
 import { ApiError, badRequest, forbidden, notFound } from "./errors";
 import { isActive, type Access } from "./members";
 import { reqKey, type Status } from "./requests";
@@ -259,3 +259,10 @@ export const requestOpenCheck = (requestId: string): TransactItem => {
     },
   };
 };
+
+export const listTasksOf = (requestId: string, consistent = false): Promise<Item[]> =>
+  queryAll({
+    KeyConditionExpression: "PK = :p AND begins_with(SK, :t)",
+    ExpressionAttributeValues: { ":p": `REQ#${requestId}`, ":t": "TASK#" },
+    ConsistentRead: consistent,
+  });

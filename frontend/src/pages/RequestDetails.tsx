@@ -1,5 +1,5 @@
 import { useCallback, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router-dom";
+import { Link, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ArrowLeft, Calendar, Check, Download, FileText, Flag, Layers, Link2, MoreVertical, Paperclip, X } from "lucide-react";
 import { Topbar } from "../components/Layout";
 import { Person, PriorityPill, StatusPill, Tabs } from "../components/ui";
@@ -9,17 +9,22 @@ import { getDownloadUrl, type Attachment } from "../api/requests";
 import { formatDate } from "../api/labels";
 import { useAuth } from "../auth/AuthContext";
 import { useAttachments, useRequestDetails, type RequestView } from "../data/useRequestDetails";
-import { useApprovalHistory, useMembers, useTasks } from "../data/useActivity";
+import { useActivityLog, useApprovalHistory, useConflicts, useMembers, useReadiness, useReport, useTasks, useValidation } from "../data/useActivity";
 import { canDecide, myCurrentRecord } from "../data/permissions";
 import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import ApprovalHistory from "../components/ApprovalHistory";
 import LifecycleCard from "../components/LifecycleCard";
 import TasksTab from "../components/TasksTab";
+import ReadinessTab from "../components/ReadinessTab";
+import ActivityTab from "../components/ActivityTab";
+import ValidationTab from "../components/ValidationTab";
+import ReportTab from "../components/ReportTab";
+import ConflictsCard from "../components/ConflictsCard";
 import DecisionPanel, { decisionResultText } from "../components/DecisionPanel";
 
 const TABS = ["Details", "Activity", "Approvals", "Attachments"];
 // TASK 07: the Tasks tab exists only in live mode, so mock mode keeps the original tabs.
-const LIVE_TABS = ["Details", "Tasks", "Activity", "Approvals", "Attachments"];
+const LIVE_TABS = ["Details", "Tasks", "Readiness", "Activity", "Validation", "Report", "Approvals", "Attachments"];
 
 export default function RequestDetails() {
   const { id = "" } = useParams();
@@ -31,7 +36,10 @@ type Flash = { kind: "success" | "error"; text: string } | null;
 
 function RequestDetailsView({ id }: { id: string }) {
   const nav = useNavigate();
-  const [tab, setTab] = useState("Details");
+  const loc = useLocation();
+  // Links from other pages (for example Reports) can open a tab directly.
+  const wanted = (loc.state as { tab?: string } | null)?.tab;
+  const [tab, setTab] = useState(config.apiEnabled && wanted && LIVE_TABS.includes(wanted) ? wanted : "Details");
   const { state, retry, refresh } = useRequestDetails(id);
   // Loaded the first time the Attachments tab is opened; kept while switching tabs.
   const attachments = useAttachments(id, tab === "Attachments");
@@ -39,6 +47,11 @@ function RequestDetailsView({ id }: { id: string }) {
   const members = useMembers(id);
   const history = useApprovalHistory(id);
   const tasks = useTasks(id, tab === "Tasks");
+  const readiness = useReadiness(id, tab === "Readiness");
+  const activityLog = useActivityLog(id, tab === "Activity");
+  const validation = useValidation(id, tab === "Validation");
+  const conflicts = useConflicts(id);
+  const report = useReport(id, tab === "Report" && state.kind === "ready" && state.data.live?.status === "COMPLETED");
   const { profile } = useAuth();
   const [flash, setFlash] = useState<Flash>(null);
 
@@ -47,7 +60,12 @@ function RequestDetailsView({ id }: { id: string }) {
     members.refresh();
     history.refresh();
     tasks.refresh();
-  }, [refresh, members.refresh, history.refresh, tasks.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
+    readiness.refresh();
+    activityLog.refresh();
+    validation.refresh();
+    report.refresh();
+    conflicts.refresh();
+  }, [refresh, members.refresh, history.refresh, tasks.refresh, readiness.refresh, activityLog.refresh, validation.refresh, report.refresh, conflicts.refresh]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (state.kind === "loading") {
     return (
@@ -140,7 +158,39 @@ function RequestDetailsView({ id }: { id: string }) {
         </div>
       )}
       <Tabs items={config.apiEnabled ? LIVE_TABS : TABS} active={tab} onChange={setTab} />
-      {tab === "Tasks" && live ? (
+      {tab === "Validation" && live ? (
+        <ValidationTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          validation={validation.state}
+          retry={validation.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Report" && live ? (
+        <ReportTab requestId={live.id} status={live.status} report={report.state} retry={report.retry} viewer={live.viewer} onChanged={refreshAll} notify={(kind, text) => setFlash({ kind, text })} />
+      ) : tab === "Activity" && live ? (
+        <ActivityTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          log={activityLog.state}
+          retry={activityLog.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Readiness" && live ? (
+        <ReadinessTab
+          requestId={live.id}
+          status={live.status}
+          viewer={live.viewer}
+          readiness={readiness.state}
+          retry={readiness.retry}
+          onChanged={refreshAll}
+          notify={(kind, text) => setFlash({ kind, text })}
+        />
+      ) : tab === "Tasks" && live ? (
         <TasksTab
           requestId={live.id}
           status={live.status}
@@ -189,6 +239,7 @@ function RequestDetailsView({ id }: { id: string }) {
                   onChanged={refreshAll}
                   notify={(kind, text) => setFlash({ kind, text })}
                 />
+                {!["COMPLETED", "CANCELLED"].includes(live.status) && <ConflictsCard state={conflicts.state} retry={conflicts.retry} />}
                 <ApproversCard ctx={ctx} />
                 <ParticipantsCard ctx={ctx} />
                 {/* Only an assigned, eligible approver with a pending decision gets controls. */}

@@ -9,6 +9,8 @@ export interface Profile {
   displayName: string;
   initials: string;
   roles: string[];
+  /** Present in live mode (GET /me). */
+  notificationPrefs?: { email: boolean };
 }
 
 type Status = "loading" | "signedOut" | "signedIn" | "error";
@@ -22,6 +24,8 @@ interface AuthValue {
   completeNewPassword: (newPassword: string) => Promise<void>;
   signOut: () => void;
   retry: () => void;
+  /** Reloads the profile without showing the loading screen (after the person edits it). */
+  reloadProfile: () => Promise<void>;
 }
 
 const AuthCtx = createContext<AuthValue | null>(null);
@@ -148,8 +152,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [loadProfile]);
 
   const value = useMemo<AuthValue>(
-    () => ({ status, profile, error, signIn, completeNewPassword, signOut, retry }),
-    [status, profile, error, signIn, completeNewPassword, signOut, retry],
+    () => ({ status, profile, error, signIn, completeNewPassword, signOut, retry, reloadProfile: loadProfile }),
+    [status, profile, error, signIn, completeNewPassword, signOut, retry, loadProfile],
   );
   return <AuthCtx.Provider value={value}>{children}</AuthCtx.Provider>;
 }

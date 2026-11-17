@@ -678,3 +678,34 @@ These rules apply to every event:
 - `DELETE /v1/requests/{requestId}/tasks/{taskId}` -> `204` (owner/admin).
 - Task: `{ id, title, description, status, assignee: {id, displayName, initials}, dueDate, overdue, createdBy, createdAt, updatedAt, completedAt, version }`. `overdue` is true for an unfinished task whose due date is before today (UTC).
 - Audit actions: `TASK_ASSIGNED`, `TASK_COMPLETED`, `TASK_UPDATED`, `TASK_DELETED`, `MEMBER_UPDATED`.
+
+## 16. TASK 08: readiness checklist (implemented)
+- `GET /v1/requests/{requestId}/readiness` -> `{ items: Item[], progress: { total, resolved, done, percent }, requestStatus, started }`. `started` is false until the request enters READINESS. Any member or admin.
+- `PATCH /v1/requests/{requestId}/readiness/{itemId}` body `{ version, state: PENDING|DONE|NOT_APPLICABLE, note? (max 500; required for NOT_APPLICABLE) }`. Owner, admin or participant, only while the request is READINESS (`409 INVALID_STATE` otherwise). `409 VERSION_CONFLICT` on a stale version.
+- `POST /v1/requests/{requestId}/readiness` body `{ group, title }` adds a custom item (owner/admin, max 30, `409 ITEM_LIMIT`). `DELETE .../readiness/{itemId}` deletes a custom item (`409 TEMPLATE_ITEM` for template items).
+- Item: `{ id, group, title, custom, state, note, updatedBy, updatedAt, version }`. Groups: BACKUP, ACCESS, FIREWALL_CONNECTIVITY, TEAM_AVAILABILITY, APP_DEPENDENCIES, DOCUMENTATION.
+- `POST /v1/requests/{requestId}/transition` to READINESS creates the six template items; to IN_PROGRESS returns `409 READINESS_INCOMPLETE` (details list the pending item ids) unless every item is DONE or NOT_APPLICABLE.
+- Audit actions: `READINESS_UPDATED`, `READINESS_ITEM_ADDED`, `READINESS_ITEM_DELETED`.
+
+## 17. TASK 09: activity log (implemented)
+- `GET /v1/requests/{requestId}/activity` -> `{ items: Entry[] (newest first), summary: { notes, issues, openIssues, openHigh }, requestStatus }`. Any member or admin.
+- `POST /v1/requests/{requestId}/activity` body `{ type: "NOTE" | "ISSUE", text (1..2000), severity?: LOW|MEDIUM|HIGH (required for ISSUE, not allowed for NOTE) }` -> `201 Entry`. Owner, admin or participant, only while the request is IN_PROGRESS or VALIDATION (`409 INVALID_STATE`). `409 ENTRY_LIMIT` at 500 entries.
+- `PATCH /v1/requests/{requestId}/activity/{entryId}` body `{ version, state: OPEN | RESOLVED, note? (required for RESOLVED, max 1000) }`. Issues only (`409 NOT_AN_ISSUE`); `409 ALREADY_IN_STATE`, `409 VERSION_CONFLICT`.
+- Entry: `{ id, type, text, severity, state, resolutionNote, resolvedBy, resolvedAt, author, createdAt, version }`.
+- Audit actions: `ACTIVITY_NOTE_ADDED`, `ISSUE_REPORTED`, `ISSUE_RESOLVED`, `ISSUE_REOPENED`.
+
+## 18. TASK 10: validation, closing and final report (implemented)
+- `GET /v1/requests/{requestId}/validation` -> `{ items: [{ domain, title, result, note, updatedBy, updatedAt, version }], progress: { total, resolved, passed, failed, percent }, requestStatus, started }`. Domains: APPLICATION, DATABASE, OS, INFRASTRUCTURE.
+- `PATCH /v1/requests/{requestId}/validation/{domain}` body `{ version, result: PENDING|PASSED|FAILED|NOT_APPLICABLE, note? (max 1000; required for FAILED and NOT_APPLICABLE) }`. Owner, admin or participant, only while the request is VALIDATION. The last open result also writes a `VALIDATION_COMPLETED` audit entry.
+- `POST /v1/requests/{requestId}/transition` to VALIDATION creates the four checks. To COMPLETED the body is `{ to: "COMPLETED", version, summary (1..5000), remainingIssues? (max 2000) }`. Errors: `409 VALIDATION_INCOMPLETE` (details list pending domains), `400` when `summary` is missing or when `remainingIssues` is missing although a check failed or an issue is open.
+- `GET /v1/requests/{requestId}/report` -> the stored final report (any member or admin); `404` until the request is COMPLETED.
+- Audit actions: `VALIDATION_UPDATED`, `VALIDATION_COMPLETED`; closing is the usual `REQUEST_STATUS_CHANGED` with `finalReport: true`.
+
+## 19. TASK 11: AI activity summary (implemented, disabled by default)
+- `POST /v1/requests/{requestId}/report/summary/generate` body `{ language?: "en" | "ar" }` -> `{ draft, language, model, saved: false }`. Owner or admin, request COMPLETED. Errors: `503 AI_DISABLED`, `502 AI_UNAVAILABLE` / `AI_EMPTY_RESPONSE`, `404` (no report), `403`. Nothing is stored.
+- `PUT /v1/requests/{requestId}/report/summary` body `{ text (1..5000), aiAssisted?: boolean, language?: "en" | "ar" }` -> `{ text, language, aiAssisted, reviewedBy, reviewedByName, reviewedAt }`. Owner or admin. Stored as `aiSummary` on the final report (returned by `GET .../report`). Audit action `SUMMARY_SAVED` (flags only, no text).
+
+## 20. TASK 12: schedule and conflicts (implemented)
+- `GET /v1/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: today + 30 days; at most 62 days) -> `{ from, to, items: [{ requestId, requestNo, title, status, start, end, environment, owner, conflictCount }], conflicts, truncated }`. Admin: every planned activity. Others: activities they belong to. Errors: `400` for bad or oversized ranges.
+- `GET /v1/requests/{requestId}/conflicts` -> `{ scheduled, items: [{ restricted, requestId, requestNo, title, status, start, end, environment, reasons: [{ type: SYSTEM|PEOPLE, systems?, people?, peopleCount? }] }] }`. Any member or admin. For activities the caller does not belong to, `restricted` is true and `requestId`, `requestNo`, `title`, `systems` and `people` are hidden.
+- Rules: see PROJECT-HANDOVER.md 14.9.

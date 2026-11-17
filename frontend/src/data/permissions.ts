@@ -92,3 +92,21 @@ export const canRespondToParticipation = (member: Member | undefined, userId: st
 /** Owner or admin may edit a member's details (not the owner row), not on finished requests. */
 export const canEditMemberDetails = (viewer: Viewer | undefined, status: ApiStatus, member: Member): boolean =>
   !!viewer?.canManageMembers && member.activityRole !== "OWNER" && member.status === "ACTIVE" && !TASKS_FROZEN.includes(status);
+
+/* ---------- TASK 08: readiness checklist ---------- */
+/** Owner, admin and participants update items, only while the request is in Readiness. Approvers only read. */
+export const canUpdateChecklist = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
+  status === "READINESS" && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");
+
+/** Owner or admin add and delete custom items, only while the request is in Readiness. */
+export const canManageChecklist = (viewer: Viewer | undefined, status: ApiStatus): boolean => status === "READINESS" && !!viewer?.canEdit;
+
+/* ---------- TASK 09: activity log ---------- */
+/** Owner, admin and participants add notes and issues and resolve issues, in the execution stages only. */
+export const canWriteActivity = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
+  (status === "IN_PROGRESS" || status === "VALIDATION") && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");
+
+/* ---------- TASK 10: validation and closing ---------- */
+/** Owner, admin and participants record results, only while the request is in Validation. */
+export const canRecordValidation = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
+  status === "VALIDATION" && (!!viewer?.canEdit || viewer?.activityRole === "PARTICIPANT");
