@@ -27,7 +27,7 @@ import * as membersApi from "../api/members";
 import type { Member, MembersResponse } from "../api/members";
 import DecisionPanel from "../components/DecisionPanel";
 import AddMemberDialog from "../components/AddMemberDialog";
-import { ApproversCard, ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
+import { ParticipantsCard, type ActivityContext } from "../components/ActivityCards";
 import Approvals from "../pages/Approvals";
 
 afterEach(cleanup);
@@ -89,79 +89,30 @@ describe("DecisionPanel", () => {
 });
 
 /* ------------------------------------------------------------------ member cards */
-describe("Approvers / Participants cards", () => {
+describe("Participants card", () => {
   const ctx = (o: Partial<ActivityContext>): ActivityContext => ({
     requestId: "R1", status: "DRAFT", version: 3, policy: "ANY_ONE", callerId: "u-sara",
     viewer: { activityRole: "OWNER", canEdit: true, canManageMembers: true },
     members: membersState([member("u-owner", "OWNER"), member("u-ali", "APPROVER"), member("u-part", "PARTICIPANT", { specialty: "SecurityNetwork", responsibilities: "Firewall" })]),
     retryMembers: vi.fn(), onChanged: vi.fn(), notify: vi.fn(), ...o,
   });
-
-  test("owner in DRAFT: policy and submit, but approvers cannot be added or removed by hand", () => {
-    render(<><ApproversCard ctx={ctx({})} /><ParticipantsCard ctx={ctx({})} /></>);
-    expect(screen.getByRole("heading", { name: "Approvers (managers)" })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Add approver/ })).toBeNull();
-    expect(screen.queryByRole("button", { name: "Remove ali" })).toBeNull(); // ali is an approver
-    expect(screen.getByRole("button", { name: "Remove part" })).toBeTruthy(); // participants can still be removed
-    expect(screen.getByRole("button", { name: /Submit for approval/ })).toBeTruthy();
-    expect(screen.getByLabelText("Approval policy")).toBeTruthy();
+  test("owner in DRAFT can add and remove participants; approvers are not listed here", () => {
+    render(<ParticipantsCard ctx={ctx({})} />);
+    expect(screen.getByRole("button", { name: /Add participant/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "Remove part" })).toBeTruthy();
     expect(screen.getByText("Security / Network · Firewall")).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Withdraw/ })).toBeNull();
+    expect(screen.queryByText("ali")).toBeNull();
   });
-
-  test("a draft with no approvers yet explains that the request goes to the managers, and can be submitted", () => {
-    const c = ctx({ members: membersState([member("u-owner", "OWNER")]) });
-    render(<ApproversCard ctx={c} />);
-    expect(screen.getByText(/the request goes to the managers automatically/)).toBeTruthy();
-    expect(screen.getByRole("button", { name: /Submit for approval/ })).toBeTruthy();
-    expect(screen.queryByText(/Add at least one approver/)).toBeNull();
-  });
-  test("an approver of this request is read-only", () => {
+  test("a member who is not the owner is read-only", () => {
     const c = ctx({ viewer: { activityRole: "APPROVER", canEdit: false, canManageMembers: false }, status: "PENDING_APPROVAL" });
-    render(<><ApproversCard ctx={c} /><ParticipantsCard ctx={c} /></>);
+    render(<ParticipantsCard ctx={c} />);
     expect(screen.queryAllByRole("button")).toHaveLength(0);
-    expect(screen.queryByLabelText("Approval policy")).toBeNull();
-    expect(screen.getByText("ali")).toBeTruthy();
   });
-
-  test("owner while pending: only Withdraw, assignments locked", () => {
-    render(<ApproversCard ctx={ctx({ status: "PENDING_APPROVAL" })} />);
-    expect(screen.getByRole("button", { name: /Withdraw/ })).toBeTruthy();
-    expect(screen.queryByRole("button", { name: /Add approver|Submit|Remove/ })).toBeNull();
-    expect(screen.getByText(/The managers above are reviewing this request/)).toBeTruthy();
-  });
-
-  test("submit sends the current version and refreshes", async () => {
-    vi.mocked(approvalsApi.submitRequest).mockResolvedValue({ requestId: "R1", status: "PENDING_APPROVAL", approvalRound: 1, approvalPolicy: "ANY_ONE", approvers: 3, version: 4 });
-    const c = ctx({});
-    render(<ApproversCard ctx={c} />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Submit for approval/ })));
-    expect(approvalsApi.submitRequest).toHaveBeenCalledWith("R1", 3);
-    expect(c.onChanged).toHaveBeenCalled();
-    expect(c.notify).toHaveBeenCalledWith("success", "Sent to 3 managers for approval (round 1).");
-  });
-  test("when no manager is available the backend message is shown", async () => {
-    const { ApiClientError } = await import("../api/client");
-    vi.mocked(approvalsApi.submitRequest).mockRejectedValue(new ApiClientError(409, "NO_APPROVERS", "No manager is available to approve this request yet."));
-    const c = ctx({});
-    render(<ApproversCard ctx={c} />);
-    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Submit for approval/ })));
-    expect(c.notify).toHaveBeenCalledWith("error", expect.stringContaining("No manager is available"));
-  });
-
-  test("withdraw requires a reason", async () => {
-    vi.mocked(approvalsApi.withdrawRequest).mockResolvedValue({ requestId: "R1", status: "DRAFT", approvalState: "WITHDRAWN", round: 1, closedRecords: 1, version: 5 });
-    render(<ApproversCard ctx={ctx({ status: "PENDING_APPROVAL", version: 4 })} />);
-    fireEvent.click(screen.getByRole("button", { name: /Withdraw/ }));
-    const dialog = screen.getByRole("dialog", { name: "Withdraw request" });
-    fireEvent.click(within(dialog).getByRole("button", { name: "Withdraw" }));
-    expect(approvalsApi.withdrawRequest).not.toHaveBeenCalled();
-    fireEvent.change(within(dialog).getByRole("textbox"), { target: { value: "Approver left" } });
-    await act(async () => fireEvent.click(within(dialog).getByRole("button", { name: "Withdraw" })));
-    expect(approvalsApi.withdrawRequest).toHaveBeenCalledWith("R1", "Approver left", 4);
+  test("participants are locked while the request waits for approval", () => {
+    render(<ParticipantsCard ctx={ctx({ status: "PENDING_APPROVAL" })} />);
+    expect(screen.queryByRole("button", { name: /Add participant|Remove/ })).toBeNull();
   });
 });
-
 /* ------------------------------------------------------------------ directory */
 describe("AddMemberDialog", () => {
   test("participant search hides people already in the request and the caller's own role rules, and never shows email", async () => {

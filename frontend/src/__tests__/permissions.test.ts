@@ -4,7 +4,6 @@ import type { Member } from "../api/members";
 import {
   assignableUsers,
   canChangeParticipants,
-  canChangePolicy,
   canDecide,
   canSubmit,
   canWithdraw,
@@ -43,8 +42,6 @@ describe("membership controls", () => {
   });
 
   test("policy, submit and withdraw follow canEdit and status", () => {
-    expect(canChangePolicy(owner, "DRAFT")).toBe(true);
-    expect(canChangePolicy(approver, "DRAFT")).toBe(false);
     // No approver needs to be chosen first: submitting sends the request to the managers.
     expect(canSubmit(owner, "DRAFT")).toBe(true);
     expect(canSubmit(owner, "REJECTED")).toBe(true);

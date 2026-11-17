@@ -1,10 +1,11 @@
 import { useState } from "react";
-import { Ban, Pencil, PlayCircle } from "lucide-react";
+import { Ban, Pencil, PlayCircle, Send, Undo2 } from "lucide-react";
 import { ApiClientError } from "../api/client";
 import { advanceLabel, LIFECYCLE_STEPS, stageLabel } from "../api/labels";
 import { MAX_REMAINING, MAX_SUMMARY } from "../api/validation";
+import { MAX_REASON, submitRequest, withdrawRequest } from "../api/approvals";
 import { cancelRequest, MAX_CANCEL_REASON, transitionRequest, type ApiStatus } from "../api/requests";
-import { canEditRequest, lifecycleActions, type Viewer } from "../data/permissions";
+import { canEditRequest, canSubmit, canWithdraw, lifecycleActions, type Viewer } from "../data/permissions";
 import EditRequestDialog from "./EditRequestDialog";
 import type { RequestFormValues } from "./RequestFields";
 import Modal from "./Modal";
@@ -30,11 +31,28 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
   const [cancelling, setCancelling] = useState(false);
   const [editing, setEditing] = useState(false);
   const [closing, setClosing] = useState(false);
+  const [withdrawing, setWithdrawing] = useState(false);
+  const submittable = canSubmit(viewer, status);
+  const withdrawable = canWithdraw(viewer, status);
   const { next, canCancel } = lifecycleActions(viewer);
   const editable = canEditRequest(viewer, status);
 
   // Rejected sits after Pending Approval; Cancelled is an exit that leaves the path.
   const currentIndex = status === "REJECTED" ? LIFECYCLE_STEPS.indexOf("PENDING_APPROVAL") : LIFECYCLE_STEPS.indexOf(status);
+
+  /** Sends the request straight to the approval stage. The managers are picked by the backend; nobody chooses them. */
+  const submit = async () => {
+    setBusy(true);
+    try {
+      await submitRequest(requestId, version);
+      notify("success", "The request was sent for approval.");
+    } catch (e) {
+      notify("error", e instanceof Error ? e.message : "The request could not be submitted.");
+    } finally {
+      setBusy(false);
+      onChanged(); // also after a 409, so the page matches the server
+    }
+  };
 
   const advance = async () => {
     if (!next) return;
@@ -63,12 +81,23 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
           );
         })}
       </ol>
+      {status === "PENDING_APPROVAL" && <p className="cell-sub">Waiting for approval.</p>}
       {status === "REJECTED" && <p className="cell-sub">Rejected. Edit the request and submit it again.</p>}
       {status === "CANCELLED" && (
         <p className="cell-sub">Cancelled{cancelReason ? `: ${cancelReason}` : "."} No further changes are possible.</p>
       )}
-      {(next || editable || canCancel) && (
+      {(submittable || withdrawable || next || editable || canCancel) && (
         <div className="side-actions">
+          {submittable && (
+            <button type="button" className="btn btn-primary" onClick={submit} disabled={busy}>
+              <Send size={16} />{busy ? "Sending…" : "Submit for approval"}
+            </button>
+          )}
+          {withdrawable && (
+            <button type="button" className="btn btn-outline" onClick={() => setWithdrawing(true)} disabled={busy}>
+              <Undo2 size={16} />Withdraw
+            </button>
+          )}
           {next && (
             <button type="button" className="btn btn-primary" onClick={next === "COMPLETED" ? () => setClosing(true) : advance} disabled={busy}>
               <PlayCircle size={16} />{busy ? "Updating…" : advanceLabel(next)}
@@ -96,6 +125,25 @@ export default function LifecycleCard({ requestId, status, version, viewer, fiel
           onSaved={() => {
             setEditing(false);
             notify("success", "The request was updated.");
+            onChanged();
+          }}
+        />
+      )}
+      {withdrawing && (
+        <TextActionDialog
+          title="Withdraw request"
+          intro="The request goes back to Draft and the approval is cancelled. Decisions already made stay in the history. You can edit it and submit it again."
+          label="Reason" required maxLength={MAX_REASON} submitLabel="Withdraw" busyLabel="Withdrawing…" tone="primary"
+          onClose={() => setWithdrawing(false)}
+          onSubmit={async (reason) => {
+            try {
+              await withdrawRequest(requestId, reason, version);
+            } catch (e) {
+              if (e instanceof ApiClientError && e.status === 409) onChanged();
+              throw e;
+            }
+            setWithdrawing(false);
+            notify("success", "The request was withdrawn and is a draft again.");
             onChanged();
           }}
         />

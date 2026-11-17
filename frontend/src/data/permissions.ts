@@ -17,13 +17,6 @@ const MEMBERSHIP_FROZEN: ApiStatus[] = ["PENDING_APPROVAL", "COMPLETED", "CANCEL
 export const canChangeParticipants = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
   !!viewer?.canManageMembers && !MEMBERSHIP_FROZEN.includes(status);
 
-export const canChangePolicy = (viewer: Viewer | undefined, status: ApiStatus): boolean =>
-  !!viewer?.canEdit && APPROVER_EDITABLE.includes(status);
-
-/** The approvers (the managers) of the current round. They are assigned by the system at submit; nobody picks them. */
-export const activeApprovers = (members: Member[]): Member[] =>
-  members.filter((m) => m.status === "ACTIVE" && m.activityRole === "APPROVER");
-
 /** Submitting needs no approver to be chosen: the request goes to the managers automatically. */
 export const canSubmit = (viewer: Viewer | undefined, status: ApiStatus): boolean => !!viewer?.canEdit && APPROVER_EDITABLE.includes(status);
 
