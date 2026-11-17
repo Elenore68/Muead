@@ -7,7 +7,6 @@ import type { ApiStatus } from "../api/requests";
 import { participationLabel, policyLabel, specialtyLabel } from "../api/labels";
 import {
   activeApprovers,
-  canChangeApprovers,
   canChangeParticipants,
   canChangePolicy,
   canEditMemberDetails,
@@ -114,7 +113,7 @@ function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; ro
       )}
       {removing && (
         <ConfirmDialog
-          title={`Remove ${role === "APPROVER" ? "approver" : "participant"}`}
+          title="Remove participant"
           message={`Remove ${removing.displayName} from this request? Their past actions stay in the history.`}
           confirmLabel="Remove"
           busyLabel="Removing…"
@@ -138,22 +137,19 @@ function MembersBody({ ctx, role, canChange, empty }: { ctx: ActivityContext; ro
 
 /* ------------------------------------------------------------------ Approvers card (decision 7) */
 export function ApproversCard({ ctx }: { ctx: ActivityContext }) {
-  const [adding, setAdding] = useState(false);
   const [withdrawing, setWithdrawing] = useState(false);
   const [busy, setBusy] = useState<"" | "submit" | "policy">("");
   const members = ctx.members.kind === "ready" ? ctx.members.data.items : [];
-  const max = ctx.members.kind === "ready" ? ctx.members.data.limits.maxApprovers : 20;
   const approverCount = activeApprovers(members).length;
-  const changeApprovers = canChangeApprovers(ctx.viewer, ctx.status);
   const changePolicy = canChangePolicy(ctx.viewer, ctx.status);
-  const submittable = canSubmit(ctx.viewer, ctx.status, members);
+  const submittable = canSubmit(ctx.viewer, ctx.status);
   const withdrawable = canWithdraw(ctx.viewer, ctx.status);
 
   const onSubmit = async () => {
     setBusy("submit");
     try {
       const res = await submitRequest(ctx.requestId, ctx.version);
-      ctx.notify("success", `Submitted for approval (round ${res.approvalRound}, ${res.approvers} approver${res.approvers === 1 ? "" : "s"}).`);
+      ctx.notify("success", `Sent to ${res.approvers} manager${res.approvers === 1 ? "" : "s"} for approval (round ${res.approvalRound}).`);
       ctx.onChanged();
     } catch (e) {
       report(ctx, e);
@@ -177,7 +173,7 @@ export function ApproversCard({ ctx }: { ctx: ActivityContext }) {
 
   return (
     <div className="card" aria-busy={busy !== ""}>
-      <h3>Approvers</h3>
+      <h3>Approvers (managers)</h3>
       {changePolicy ? (
         <div className="field" style={{ marginBottom: 8 }}>
           <label htmlFor="approval-policy">Approval policy</label>
@@ -189,12 +185,12 @@ export function ApproversCard({ ctx }: { ctx: ActivityContext }) {
       ) : (
         <p className="cell-sub" style={{ marginBottom: 8 }}>{policyLabel(ctx.policy)}</p>
       )}
-      <MembersBody ctx={ctx} role="APPROVER" canChange={changeApprovers} empty="No approvers assigned yet." />
-      {ctx.status === "PENDING_APPROVAL" && <p className="cell-sub">Approvers are locked while the request is waiting for approval.</p>}
+      <MembersBody ctx={ctx} role="APPROVER" canChange={false} empty="Not sent yet. When you submit, the request goes to the managers automatically." />
+      {ctx.status === "PENDING_APPROVAL" && <p className="cell-sub">The managers above are reviewing this request.</p>}
+      {approverCount > 0 && (ctx.status === "DRAFT" || ctx.status === "REJECTED") && (
+        <p className="cell-sub">Submitting again sends it to the current managers again.</p>
+      )}
       <div className="card-actions">
-        {changeApprovers && approverCount < max && (
-          <button type="button" className="btn btn-outline" onClick={() => setAdding(true)}><Plus size={16} />Add approver</button>
-        )}
         {submittable && (
           <button type="button" className="btn btn-primary" onClick={onSubmit} disabled={busy !== ""}>
             <Send size={16} />{busy === "submit" ? "Submitting…" : "Submit for approval"}
@@ -204,17 +200,10 @@ export function ApproversCard({ ctx }: { ctx: ActivityContext }) {
           <button type="button" className="btn btn-outline" onClick={() => setWithdrawing(true)}><Undo2 size={16} />Withdraw</button>
         )}
       </div>
-      {!submittable && changeApprovers && approverCount === 0 && ctx.viewer?.canEdit && (
-        <p className="cell-sub">Add at least one approver to submit this request.</p>
-      )}
-      {adding && (
-        <AddMemberDialog requestId={ctx.requestId} role="APPROVER" members={members} callerId={ctx.callerId} onClose={() => setAdding(false)}
-          onAdded={(m) => { setAdding(false); ctx.notify("success", `${m.displayName} was added as approver.`); ctx.onChanged(); }} />
-      )}
       {withdrawing && (
         <TextActionDialog
           title="Withdraw request"
-          intro="The request goes back to Draft. Pending approval decisions are closed; decisions already made stay in the history. You can then change approvers and submit again."
+          intro="The request goes back to Draft. Pending approval decisions are closed; decisions already made stay in the history. You can then edit it and submit it again; it goes to the managers again."
           label="Reason" required maxLength={MAX_REASON} submitLabel="Withdraw" busyLabel="Withdrawing…" tone="primary"
           onClose={() => setWithdrawing(false)}
           onSubmit={async (reason) => {

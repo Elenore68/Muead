@@ -1,6 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { errorMessage } from "../api/client";
-import { addMember, MIN_SEARCH, searchUsers, SPECIALTIES, type AssignableRole, type DirectoryUser, type Member } from "../api/members";
+import { addMember, MIN_SEARCH, searchUsers, SPECIALTIES, type DirectoryUser, type Member } from "../api/members";
 import { specialtyLabel } from "../api/labels";
 import { assignableUsers } from "../data/permissions";
 import Modal from "./Modal";
@@ -8,7 +8,8 @@ import { Avatar } from "./ui";
 
 interface AddMemberDialogProps {
   requestId: string;
-  role: AssignableRole;
+  /** Approvers are never chosen: the request goes to the managers automatically. */
+  role: "PARTICIPANT";
   /** Current members (any status), to hide people who already hold a role in this request. */
   members: Member[];
   callerId: string | undefined;
@@ -32,8 +33,7 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
   const [responsibilities, setResponsibilities] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const isApprover = role === "APPROVER";
-  const noun = isApprover ? "approver" : "participant";
+  const noun = "participant";
 
   useEffect(() => {
     const term = q.trim();
@@ -44,7 +44,7 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
     const ac = new AbortController();
     const t = setTimeout(() => {
       setSearch({ kind: "loading" });
-      searchUsers({ q: term, approverEligible: isApprover, limit: 20 }, ac.signal).then(
+      searchUsers({ q: term, approverEligible: false, limit: 20 }, ac.signal).then(
         (res) => {
           if (ac.signal.aborted) return;
           const users = assignableUsers(res.items, members, role, callerId);
@@ -60,7 +60,7 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
       clearTimeout(t);
       ac.abort();
     };
-  }, [q, isApprover, members, role, callerId]);
+  }, [q, members, role, callerId]);
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
@@ -72,8 +72,8 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
       const m = await addMember(requestId, {
         userId: selected.id,
         activityRole: role,
-        ...(!isApprover && specialty ? { specialty } : {}),
-        ...(!isApprover && responsibilities.trim() ? { responsibilities: responsibilities.trim() } : {}),
+        ...(specialty ? { specialty } : {}),
+        ...(responsibilities.trim() ? { responsibilities: responsibilities.trim() } : {}),
       });
       onAdded(m);
     } catch (ex) {
@@ -84,12 +84,10 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
   };
 
   return (
-    <Modal title={isApprover ? "Add approver" : "Add participant"} onClose={onClose} busy={busy}>
+    <Modal title="Add participant" onClose={onClose} busy={busy}>
       <form onSubmit={submit} noValidate aria-busy={busy}>
         <p className="page-sub" style={{ marginBottom: 12 }}>
-          {isApprover
-            ? "Only people in the ApprovalEligible group can be assigned. Owners and participants of this request cannot approve it."
-            : "Participants work on this activity. They cannot approve it."}
+          Participants work on this activity. They cannot approve it. Approvers are not chosen: the request goes to the managers when it is submitted.
         </p>
         <div className="field">
           <label htmlFor="member-search">Search by name</label>
@@ -117,7 +115,7 @@ export default function AddMemberDialog({ requestId, role, members, callerId, on
             ))}
           </ul>
         )}
-        {!isApprover && (
+        {(
           <>
             <div className="field">
               <label htmlFor="member-specialty">Specialty <span className="cell-sub">(optional)</span></label>

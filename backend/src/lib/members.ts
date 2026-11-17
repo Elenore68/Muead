@@ -16,7 +16,8 @@ export const ASSIGNABLE_ROLES = ["PARTICIPANT", "APPROVER"] as const;
 export type AssignableRole = (typeof ASSIGNABLE_ROLES)[number];
 
 /** Caps keep every approval transaction far below DynamoDB's 100-item limit (see lib/approvals.ts). */
-export const MAX_APPROVERS = 20;
+/** Managers are assigned automatically at submit, so this must hold every manager. Submit writes up to 3 items per manager (member, record, removal): 3 x 30 + 5 < 100. */
+export const MAX_APPROVERS = 30;
 export const MAX_MEMBERS = 50;
 
 export const TEAMS = ["Cloud", "Database", "Application", "OS", "SecurityNetwork"] as const;
@@ -169,8 +170,11 @@ const lockChecks = (status: Status, role: string) => {
 };
 
 /** Throws the first rule violation. Order matters: permission, state, target, conflicts, caps. */
+export const APPROVERS_AUTOMATIC_MESSAGE = "Approvers cannot be chosen. When the request is submitted it goes to the managers automatically.";
+
 export const validateAssignment = (i: AssignmentInput): void => {
   if (!i.access.canManageMembers) throw forbidden("Only the owner of this request or a platform admin can assign members");
+  if (i.role === "APPROVER") throw new ApiError(409, "APPROVERS_AUTOMATIC", APPROVERS_AUTOMATIC_MESSAGE);
   lockChecks(i.requestStatus, i.role);
   if (!i.targetExists) throw new ApiError(404, "USER_NOT_FOUND", "User not found. People appear in the directory after their first sign-in.");
   if (!i.targetActive) throw new ApiError(409, "USER_INACTIVE", "This user is not active");
@@ -181,13 +185,6 @@ export const validateAssignment = (i: AssignmentInput): void => {
       "ROLE_CONFLICT",
       `This person is already the ${String(i.existing.activityRole).toLowerCase()} of this request. A person can hold only one role per request, so owners and participants cannot approve it.`,
     );
-  }
-  if (i.role === "APPROVER") {
-    if (i.targetUserId === i.ownerId) throw new ApiError(409, "ROLE_CONFLICT", "The owner cannot approve their own request");
-    // Decision 5: nobody (platform admins included) can make themselves an approver.
-    if (i.targetUserId === i.caller.userId) throw new ApiError(403, "SELF_ASSIGNMENT_FORBIDDEN", "You cannot assign yourself as an approver");
-    if (!i.targetEligible) throw new ApiError(409, "NOT_ELIGIBLE", "This person is not in the ApprovalEligible group");
-    if (i.activeApprovers >= MAX_APPROVERS) throw new ApiError(409, "APPROVER_LIMIT", `A request can have at most ${MAX_APPROVERS} approvers`);
   }
   if (i.activeMembers >= MAX_MEMBERS) throw new ApiError(409, "MEMBER_LIMIT", `A request can have at most ${MAX_MEMBERS} members`);
 };
@@ -202,6 +199,7 @@ export const validateRemoval = (i: RemovalInput): void => {
   if (!i.access.canManageMembers) throw forbidden("Only the owner of this request or a platform admin can remove members");
   if (!isActive(i.member)) throw notFound("Member not found");
   if (i.member.activityRole === "OWNER") throw new ApiError(400, "CANNOT_REMOVE_OWNER", "The owner cannot be removed from the request");
+  if (i.member.activityRole === "APPROVER") throw new ApiError(409, "APPROVERS_AUTOMATIC", APPROVERS_AUTOMATIC_MESSAGE);
   lockChecks(i.requestStatus, i.member.activityRole);
 };
 

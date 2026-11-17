@@ -1,4 +1,4 @@
-import { batchGet, type Item } from "./db";
+import { batchGet, queryAll, type Item } from "./db";
 
 /**
  * User directory (database-design.md 3.1).
@@ -40,3 +40,20 @@ export const toDirectoryEntry = (p: Item, eligible: boolean) => ({
   initials: p.initials as string,
   approvalEligible: eligible,
 });
+
+/**
+ * The managers: every person in the ApprovalEligible group who has signed in at least once (the group mirror is written
+ * at sign-in) and whose profile is ACTIVE. Index reads are eventually consistent; the profile status is read per user.
+ */
+export const listManagers = async (): Promise<{ userId: string; displayName: string; initials: string; active: boolean }[]> => {
+  const mirrors = await queryAll({
+    IndexName: "GSI2",
+    KeyConditionExpression: "GSI2PK = :p",
+    ExpressionAttributeValues: { ":p": "ROLE#ApprovalEligible" },
+  }, 500);
+  const facts = await loadUserFacts(mirrors.map((m) => m.userId as string));
+  return mirrors.map((m) => {
+    const f = facts.get(m.userId as string);
+    return { userId: m.userId as string, displayName: (f?.profile?.displayName ?? m.displayName) as string, initials: (f?.profile?.initials ?? m.initials) as string, active: !!f?.active };
+  });
+};

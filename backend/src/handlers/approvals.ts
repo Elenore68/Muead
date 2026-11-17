@@ -12,6 +12,7 @@ import {
   recordKey,
   roundKey,
   roundStr,
+  selectManagers,
   validateSubmit,
   validateWithdraw,
   type Decision,
@@ -20,11 +21,11 @@ import { auditItem } from "../lib/audit";
 import { batchGet, queryAll, queryCount, queryPage, TABLE, transact, txConditionFailed, type Item, type TransactItem } from "../lib/db";
 import { badRequest, conflict } from "../lib/errors";
 import { assertTokenPartition, decodeToken, encodeToken, json, parseLimit, router, type Ctx } from "../lib/http";
-import { assertView, getMember, isActive, listMembers, memberKey } from "../lib/members";
+import { assertView, buildMember, getMember, isActive, listMembers, memberKey } from "../lib/members";
 import { validateSubmitFields } from "../lib/lifecycle";
 import { indexAttrs, loadRequest, reqKey } from "../lib/requests";
 import { statsOnStatusChange } from "../lib/stats";
-import { loadUserFacts } from "../lib/users";
+import { listManagers } from "../lib/users";
 
 /** Copy of a request item with new attributes and recomputed index keys (status/schedule indexes). */
 /** `changes` values of `undefined` REMOVE the attribute (explicitly, not relying on the marshaller). */
@@ -55,14 +56,17 @@ const submit = async ({ caller, path, body }: Ctx) => {
   const access = await assertView(r, caller, CONSISTENT);
   if (body.version !== r.version) throw conflict("VERSION_CONFLICT", "The request was changed by someone else. Reload and try again.");
 
-  const approverMembers = (await listMembers(r.id, CONSISTENT)).filter((m) => isActive(m) && m.activityRole === "APPROVER");
-  const facts = await loadUserFacts(approverMembers.map((m) => m.userId));
-  validateSubmit({
-    canEdit: access.canEdit,
-    request: r,
-    approvers: approverMembers.map((m) => ({ member: m, profileActive: !!facts.get(m.userId)?.active, eligible: !!facts.get(m.userId)?.eligible })),
-  });
-  // TASK 06: the SOW fields must be filled before approvers are asked to review the plan.
+  // The owner does not choose approvers: the request goes to the managers (see selectManagers in lib/approvals.ts).
+  const allMembers = await listMembers(r.id, CONSISTENT);
+  const managers = selectManagers({ candidates: await listManagers(), ownerId: r.ownerId, callerId: caller.userId, members: allMembers });
+  validateSubmit({ canEdit: access.canEdit, request: r, approvers: managers });
+  const approverMembers = managers.map((m) => ({ userId: m.userId, displayName: m.displayName, initials: m.initials }));
+  // Keep the request's member list in step with the managers of this round.
+  const chosen = new Set(managers.map((m) => m.userId));
+  const existing = new Map(allMembers.map((m) => [m.userId as string, m]));
+  const toAdd = managers.filter((m) => !(isActive(existing.get(m.userId)) && existing.get(m.userId)!.activityRole === "APPROVER"));
+  const toRemove = allMembers.filter((m) => isActive(m) && m.activityRole === "APPROVER" && !chosen.has(m.userId));
+  const system = { userId: "SYSTEM", displayName: "Automatic (managers)", initials: "AU" };
   validateSubmitFields(r);
 
   const now = new Date().toISOString();
@@ -76,6 +80,7 @@ const submit = async ({ caller, path, body }: Ctx) => {
     approvalPolicy: policy,
     submittedAt: now,
     submittedBy: caller.userId,
+    membersRev: (r.membersRev ?? 0) + 1,
     // Clear the previous round's outcome fields (undefined attributes are dropped by the Put).
     approvalDecidedAt: undefined,
     withdrawnAt: undefined,
@@ -141,10 +146,38 @@ const submit = async ({ caller, path, body }: Ctx) => {
       },
     },
     ...records.map((Item) => ({ Put: { TableName: TABLE, Item, ConditionExpression: "attribute_not_exists(PK)" } })),
+    // New managers become APPROVER members (or are re-activated if they were removed in an earlier round).
+    ...toAdd.map(
+      (m): TransactItem => ({
+        Put: {
+          TableName: TABLE,
+          Item: buildMember({ request: r, user: m, role: "APPROVER", assignedBy: system, assignedByRole: "SYSTEM", now }),
+          ConditionExpression: "attribute_not_exists(PK) OR #st = :removed",
+          ExpressionAttributeNames: { "#st": "status" },
+          ExpressionAttributeValues: { ":removed": "REMOVED" },
+        },
+      }),
+    ),
+    // Approvers of an earlier round who are no longer managers are removed (soft: history stays).
+    ...toRemove.map(
+      (m): TransactItem => ({
+        Update: {
+          TableName: TABLE,
+          Key: memberKey(r.id, m.userId),
+          UpdateExpression: "SET #st = :removed, removedAt = :now, removedBy = :by, removedByName = :byName, removedByRole = :byRole REMOVE GSI1PK, GSI1SK",
+          ConditionExpression: "#st = :active",
+          ExpressionAttributeNames: { "#st": "status" },
+          ExpressionAttributeValues: { ":removed": "REMOVED", ":active": "ACTIVE", ":now": now, ":by": system.userId, ":byName": system.displayName, ":byRole": "SYSTEM" },
+        },
+      }),
+    ),
     {
       Put: {
         TableName: TABLE,
         Item: auditItem(r.id, actor, "SUBMITTED_FOR_APPROVAL", {
+          autoAssigned: true,
+          added: toAdd.map((m) => m.userId),
+          removed: toRemove.map((m) => m.userId),
           round,
           policy,
           approvers: approverMembers.map((m) => ({ userId: m.userId, displayName: m.displayName })),

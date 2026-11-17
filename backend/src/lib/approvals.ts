@@ -34,30 +34,46 @@ export const inboxSK = (decision: Decision, submittedAt: string, requestId: stri
 export const policyOf = (r: Item): Policy => ((POLICIES as readonly string[]).includes(r.approvalPolicy) ? r.approvalPolicy : DEFAULT_POLICY);
 
 /* ------------------------------------------------------------------ submit (pure) */
-export interface ApproverCheck {
-  member: Item;
-  profileActive: boolean;
-  /** ApprovalEligible mirror at submit time. */
-  eligible: boolean;
+/**
+ * Approvers are NOT chosen by the owner. When a request is submitted it goes to the managers automatically:
+ * every active person in the ApprovalEligible group (the "managers" group; they appear after their first sign-in),
+ * except people who cannot approve THIS request:
+ *   - the owner (nobody approves their own request),
+ *   - the person submitting (decision 5: nobody makes themselves an approver, platform admins included),
+ *   - anyone who already has another role in the request (one role per person per request; a participant who is also
+ *     a manager stays a participant).
+ * The list is recomputed on every submission (new round), so managers who joined or left since the last round are
+ * picked up or dropped.
+ */
+export interface ManagerCandidate {
+  userId: string;
+  displayName: string;
+  initials: string;
+  /** Profile status is ACTIVE. */
+  active: boolean;
 }
 
-export const validateSubmit = (p: { canEdit: boolean; request: Item; approvers: ApproverCheck[] }): void => {
+export const selectManagers = (p: { candidates: ManagerCandidate[]; ownerId: string; callerId: string; members: Item[] }): ManagerCandidate[] => {
+  const otherRole = new Set(p.members.filter((m) => isActive(m) && m.activityRole !== "APPROVER").map((m) => m.userId as string));
+  return p.candidates
+    .filter((c) => c.active && c.userId !== p.ownerId && c.userId !== p.callerId && !otherRole.has(c.userId))
+    .sort((a, b) => a.displayName.localeCompare(b.displayName) || a.userId.localeCompare(b.userId));
+};
+
+export const validateSubmit = (p: { canEdit: boolean; request: Item; approvers: ManagerCandidate[] }): void => {
   if (!p.canEdit) throw new ApiError(403, "FORBIDDEN", "Only the owner of this request can submit it");
   if (p.request.status !== "DRAFT" && p.request.status !== "REJECTED") {
     throw new ApiError(409, "INVALID_STATE", `A request in status ${p.request.status} cannot be submitted`);
   }
-  if (p.approvers.length === 0) throw new ApiError(400, "NO_APPROVERS", "Assign at least one approver before submitting");
-  if (p.approvers.length > MAX_APPROVERS) throw new ApiError(409, "APPROVER_LIMIT", `A request can have at most ${MAX_APPROVERS} approvers`);
-  const problems: { field: string; issue: string }[] = [];
-  for (const a of p.approvers) {
-    const who = a.member.userId as string;
-    if (a.member.activityRole !== "APPROVER" || !isActive(a.member)) problems.push({ field: who, issue: "not_an_active_approver" });
-    else if (who === p.request.ownerId) problems.push({ field: who, issue: "owner_cannot_approve" });
-    else if (!a.profileActive) problems.push({ field: who, issue: "user_inactive" });
-    else if (!a.eligible) problems.push({ field: who, issue: "not_approval_eligible" });
+  if (p.approvers.length === 0) {
+    throw new ApiError(
+      409,
+      "NO_APPROVERS",
+      "No manager is available to approve this request yet. Managers can approve after they have signed in once. Ask an administrator.",
+    );
   }
-  if (problems.length) {
-    throw new ApiError(409, "APPROVER_INVALID", "Some assigned approvers can no longer approve. Update the approvers and submit again.", problems);
+  if (p.approvers.length > MAX_APPROVERS) {
+    throw new ApiError(409, "APPROVER_LIMIT", `There are more than ${MAX_APPROVERS} managers. Ask an administrator to reduce the ApprovalEligible group.`);
   }
 };
 

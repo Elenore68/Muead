@@ -97,16 +97,25 @@ describe("Approvers / Participants cards", () => {
     retryMembers: vi.fn(), onChanged: vi.fn(), notify: vi.fn(), ...o,
   });
 
-  test("owner in DRAFT: add, remove, policy and submit", () => {
+  test("owner in DRAFT: policy and submit, but approvers cannot be added or removed by hand", () => {
     render(<><ApproversCard ctx={ctx({})} /><ParticipantsCard ctx={ctx({})} /></>);
-    expect(screen.getByRole("button", { name: /Add approver/ })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "Approvers (managers)" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: /Add approver/ })).toBeNull();
+    expect(screen.queryByRole("button", { name: "Remove ali" })).toBeNull(); // ali is an approver
+    expect(screen.getByRole("button", { name: "Remove part" })).toBeTruthy(); // participants can still be removed
     expect(screen.getByRole("button", { name: /Submit for approval/ })).toBeTruthy();
-    expect(screen.getByRole("button", { name: "Remove ali" })).toBeTruthy();
     expect(screen.getByLabelText("Approval policy")).toBeTruthy();
     expect(screen.getByText("Security / Network · Firewall")).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Withdraw/ })).toBeNull();
   });
 
+  test("a draft with no approvers yet explains that the request goes to the managers, and can be submitted", () => {
+    const c = ctx({ members: membersState([member("u-owner", "OWNER")]) });
+    render(<ApproversCard ctx={c} />);
+    expect(screen.getByText(/the request goes to the managers automatically/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /Submit for approval/ })).toBeTruthy();
+    expect(screen.queryByText(/Add at least one approver/)).toBeNull();
+  });
   test("an approver of this request is read-only", () => {
     const c = ctx({ viewer: { activityRole: "APPROVER", canEdit: false, canManageMembers: false }, status: "PENDING_APPROVAL" });
     render(<><ApproversCard ctx={c} /><ParticipantsCard ctx={c} /></>);
@@ -119,16 +128,25 @@ describe("Approvers / Participants cards", () => {
     render(<ApproversCard ctx={ctx({ status: "PENDING_APPROVAL" })} />);
     expect(screen.getByRole("button", { name: /Withdraw/ })).toBeTruthy();
     expect(screen.queryByRole("button", { name: /Add approver|Submit|Remove/ })).toBeNull();
-    expect(screen.getByText(/locked while the request is waiting/)).toBeTruthy();
+    expect(screen.getByText(/The managers above are reviewing this request/)).toBeTruthy();
   });
 
   test("submit sends the current version and refreshes", async () => {
-    vi.mocked(approvalsApi.submitRequest).mockResolvedValue({ requestId: "R1", status: "PENDING_APPROVAL", approvalRound: 1, approvalPolicy: "ANY_ONE", approvers: 1, version: 4 });
+    vi.mocked(approvalsApi.submitRequest).mockResolvedValue({ requestId: "R1", status: "PENDING_APPROVAL", approvalRound: 1, approvalPolicy: "ANY_ONE", approvers: 3, version: 4 });
     const c = ctx({});
     render(<ApproversCard ctx={c} />);
     await act(async () => fireEvent.click(screen.getByRole("button", { name: /Submit for approval/ })));
     expect(approvalsApi.submitRequest).toHaveBeenCalledWith("R1", 3);
     expect(c.onChanged).toHaveBeenCalled();
+    expect(c.notify).toHaveBeenCalledWith("success", "Sent to 3 managers for approval (round 1).");
+  });
+  test("when no manager is available the backend message is shown", async () => {
+    const { ApiClientError } = await import("../api/client");
+    vi.mocked(approvalsApi.submitRequest).mockRejectedValue(new ApiClientError(409, "NO_APPROVERS", "No manager is available to approve this request yet."));
+    const c = ctx({});
+    render(<ApproversCard ctx={c} />);
+    await act(async () => fireEvent.click(screen.getByRole("button", { name: /Submit for approval/ })));
+    expect(c.notify).toHaveBeenCalledWith("error", expect.stringContaining("No manager is available"));
   });
 
   test("withdraw requires a reason", async () => {
@@ -146,36 +164,32 @@ describe("Approvers / Participants cards", () => {
 
 /* ------------------------------------------------------------------ directory */
 describe("AddMemberDialog", () => {
-  test("approver search: eligible only, hides members and the caller, never shows email", async () => {
+  test("participant search hides people already in the request and the caller's own role rules, and never shows email", async () => {
     vi.mocked(membersApi.searchUsers).mockResolvedValue({
       items: [
         { id: "u-ali", displayName: "Ali", initials: "Al", approvalEligible: true },
-        { id: "u-sara", displayName: "Sara", initials: "Sa", approvalEligible: true },
-        { id: "u-saad", displayName: "Saad", initials: "Sa", approvalEligible: true },
+        { id: "u-saad", displayName: "Saad", initials: "Sa", approvalEligible: false },
       ],
       nextToken: null,
     });
-    vi.mocked(membersApi.addMember).mockResolvedValue(member("u-saad", "APPROVER"));
+    vi.mocked(membersApi.addMember).mockResolvedValue(member("u-saad", "PARTICIPANT"));
     const onAdded = vi.fn();
-    render(<AddMemberDialog requestId="R1" role="APPROVER" members={[member("u-owner", "OWNER"), member("u-ali", "PARTICIPANT")]} callerId="u-sara" onAdded={onAdded} onClose={() => {}} />);
-
+    render(<AddMemberDialog requestId="R1" role="PARTICIPANT" members={[member("u-owner", "OWNER"), member("u-ali", "APPROVER")]} callerId="u-sara" onAdded={onAdded} onClose={() => {}} />);
+    expect(screen.getByRole("dialog", { name: "Add participant" })).toBeTruthy();
+    expect(document.body.textContent).toMatch(/goes to the managers when it is submitted/);
     fireEvent.change(screen.getByLabelText("Search by name"), { target: { value: "s" } });
     await new Promise((r) => setTimeout(r, 350));
     expect(membersApi.searchUsers).not.toHaveBeenCalled(); // < 2 characters
-
     fireEvent.change(screen.getByLabelText("Search by name"), { target: { value: "sa" } });
     await waitFor(() => expect(screen.getByRole("listbox")).toBeTruthy());
-    expect(membersApi.searchUsers).toHaveBeenCalledWith({ q: "sa", approverEligible: true, limit: 20 }, expect.anything());
-    const options = screen.getAllByRole("option").map((o) => o.textContent);
-    expect(options).toEqual(["SaSaadEligible approver"]); // Ali is already a participant, Sara is the caller
+    expect(membersApi.searchUsers).toHaveBeenCalledWith({ q: "sa", approverEligible: false, limit: 20 }, expect.anything());
+    expect(within(screen.getByRole("listbox")).getAllByRole("option").map((o) => o.textContent)).toEqual(["SaSaad"]); // Ali already approves this request
     expect(document.body.textContent).not.toMatch(/@/);
-
     fireEvent.click(screen.getByRole("button", { name: /Saad/ }));
     await act(async () => fireEvent.click(screen.getByRole("button", { name: "Add Saad" })));
-    expect(membersApi.addMember).toHaveBeenCalledWith("R1", { userId: "u-saad", activityRole: "APPROVER" });
+    expect(membersApi.addMember).toHaveBeenCalledWith("R1", { userId: "u-saad", activityRole: "PARTICIPANT" });
     expect(onAdded).toHaveBeenCalled();
   });
-
   test("participant: specialty and responsibilities are sent; backend errors are shown", async () => {
     const { ApiClientError } = await import("../api/client");
     vi.mocked(membersApi.searchUsers).mockResolvedValue({ items: [{ id: "u-noor", displayName: "Noor", initials: "No", approvalEligible: false }], nextToken: null });

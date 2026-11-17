@@ -667,6 +667,16 @@ No new backend routes: the pages use `GET /users`, `GET /requests`, `PATCH /me` 
 - **Runbook:** `docs/DEPLOYMENT.md`. Local connection: `frontend/.env.local` (git-ignored).
 - **Still open:** hosting (Amplify) and the production CORS origin, SES and Bedrock decisions, CloudWatch alarms, a dead-letter queue, EventBridge reminders, MFA in the UI, deploying with a named IAM user instead of the account root (the `signin` session used for this deploy was the root user).
 
+### 14.12 Approvers are the managers, assigned automatically (change requested by the owner, 2026-11-17)
+This **replaces** the earlier rule that the owner chooses approvers (sections 8, 9 and TASK 04 describe the old behaviour for adding approvers; everything else there still holds).
+- **Who is a manager:** everyone in the Cognito group `ApprovalEligible` (the group name is unchanged; the UI calls them managers) who has signed in at least once (the group mirror is written at sign-in) and whose profile is active.
+- **At submit** (`POST /v1/requests/{id}/submit`) the backend picks the managers, in the same transaction creates the round, one decision record per manager **and** an `APPROVER` member for each (`assignedByRole: SYSTEM`), and removes approvers of an earlier round who are no longer managers. Skipped: the **owner**, the **person submitting** (nobody makes themselves an approver, admins included), and anyone who already has another role in the request (a manager who is a participant stays a participant). The list is recomputed on every submission.
+- **Errors:** `409 NO_APPROVERS` when nobody is left (managers must sign in once); `409 APPROVER_LIMIT` above 30 managers (`MAX_APPROVERS` was 20; the submit transaction writes up to 3 items per manager).
+- **Choosing is gone:** `POST /requests/{id}/members` with `activityRole: APPROVER` and removing an approver answer `409 APPROVERS_AUTOMATIC`. Participants are unchanged. The approval policy (ANY_ONE / ALL) is still chosen by the owner; with ALL every manager must approve.
+- **Frontend:** the Approvers card is titled "Approvers (managers)", has no Add/Remove, explains that the request goes to the managers, and "Submit for approval" no longer needs an approver first. The add dialog is participants-only.
+- **Limitations:** a manager appears only after their first sign-in; a revoked group membership takes effect at that person's next sign-in (mirror refresh) and, for decisions, within the token lifetime; there is no per-team or per-department routing (every manager gets every request).
+- **Verified:** backend 197 / 197 tests, frontend 137 / 137, and the 28-step smoke test against the deployed stack (the stack was updated in place).
+
 ### 14.2 Roadmap
 > **Recommendation**, not SOW text: acceptance criteria are suggestions to confirm with the owner.
 

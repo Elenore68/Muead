@@ -3,7 +3,6 @@ import type { ApprovalHistory } from "../api/approvals";
 import type { Member } from "../api/members";
 import {
   assignableUsers,
-  canChangeApprovers,
   canChangeParticipants,
   canChangePolicy,
   canDecide,
@@ -32,17 +31,10 @@ const history = (decision: string, userId = SARA, currentRound = 1): ApprovalHis
 });
 
 describe("membership controls", () => {
-  test("approvers change only in DRAFT/REJECTED, by owner or admin", () => {
-    expect(canChangeApprovers(owner, "DRAFT")).toBe(true);
-    expect(canChangeApprovers(owner, "REJECTED")).toBe(true);
-    expect(canChangeApprovers(owner, "PENDING_APPROVAL")).toBe(false);
-    expect(canChangeApprovers(owner, "APPROVED")).toBe(false);
-    expect(canChangeApprovers(adminNonMember, "DRAFT")).toBe(true);
-    expect(canChangeApprovers(approver, "DRAFT")).toBe(false);
-    expect(canChangeApprovers(participant, "DRAFT")).toBe(false);
-    expect(canChangeApprovers(undefined, "DRAFT")).toBe(false);
+  test("there is no way to choose approvers: they are the managers, assigned at submit", async () => {
+    const mod = await import("../data/permissions");
+    expect("canChangeApprovers" in mod).toBe(false);
   });
-
   test("participants are locked while pending and when finished", () => {
     expect(canChangeParticipants(owner, "IN_PROGRESS")).toBe(true);
     expect(canChangeParticipants(owner, "PENDING_APPROVAL")).toBe(false);
@@ -53,11 +45,15 @@ describe("membership controls", () => {
   test("policy, submit and withdraw follow canEdit and status", () => {
     expect(canChangePolicy(owner, "DRAFT")).toBe(true);
     expect(canChangePolicy(approver, "DRAFT")).toBe(false);
-    expect(canSubmit(owner, "DRAFT", [member(OWNER, "OWNER")])).toBe(false);
-    expect(canSubmit(owner, "DRAFT", [member(OWNER, "OWNER"), member(SARA, "APPROVER")])).toBe(true);
-    expect(canSubmit(owner, "DRAFT", [member(SARA, "APPROVER", "REMOVED")])).toBe(false);
-    expect(canSubmit(owner, "PENDING_APPROVAL", [member(SARA, "APPROVER")])).toBe(false);
-    expect(canSubmit(approver, "DRAFT", [member(SARA, "APPROVER")])).toBe(false);
+    // No approver needs to be chosen first: submitting sends the request to the managers.
+    expect(canSubmit(owner, "DRAFT")).toBe(true);
+    expect(canSubmit(owner, "REJECTED")).toBe(true);
+    expect(canSubmit(adminNonMember, "DRAFT")).toBe(true);
+    expect(canSubmit(owner, "PENDING_APPROVAL")).toBe(false);
+    expect(canSubmit(owner, "APPROVED")).toBe(false);
+    expect(canSubmit(approver, "DRAFT")).toBe(false);
+    expect(canSubmit(participant, "DRAFT")).toBe(false);
+    expect(canSubmit(undefined, "DRAFT")).toBe(false);
     expect(canWithdraw(owner, "PENDING_APPROVAL")).toBe(true);
     expect(canWithdraw(owner, "DRAFT")).toBe(false);
     expect(canWithdraw(approver, "PENDING_APPROVAL")).toBe(false);

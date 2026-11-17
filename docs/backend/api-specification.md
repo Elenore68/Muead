@@ -709,3 +709,8 @@ These rules apply to every event:
 - `GET /v1/schedule?from=YYYY-MM-DD&to=YYYY-MM-DD` (default: today + 30 days; at most 62 days) -> `{ from, to, items: [{ requestId, requestNo, title, status, start, end, environment, owner, conflictCount }], conflicts, truncated }`. Admin: every planned activity. Others: activities they belong to. Errors: `400` for bad or oversized ranges.
 - `GET /v1/requests/{requestId}/conflicts` -> `{ scheduled, items: [{ restricted, requestId, requestNo, title, status, start, end, environment, reasons: [{ type: SYSTEM|PEOPLE, systems?, people?, peopleCount? }] }] }`. Any member or admin. For activities the caller does not belong to, `restricted` is true and `requestId`, `requestNo`, `title`, `systems` and `people` are hidden.
 - Rules: see PROJECT-HANDOVER.md 14.9.
+
+## 21. Approvers are the managers (changes the approver parts of sections 3 and 12)
+- `POST /v1/requests/{requestId}/submit` no longer needs approvers to exist. It assigns the managers (ApprovalEligible group, signed in at least once, active profile) automatically, except the owner, the submitter and people with another role in the request. Response: `{ requestId, status, approvalRound, approvalPolicy, approvers (count), version }`. Errors: `409 NO_APPROVERS`, `409 APPROVER_LIMIT` (more than 30 managers), plus the existing ones.
+- `POST /v1/requests/{requestId}/members` with `activityRole: "APPROVER"` and `DELETE /v1/requests/{requestId}/members/{userId}` for an approver return `409 APPROVERS_AUTOMATIC`.
+- The audit entry `SUBMITTED_FOR_APPROVAL` carries `autoAssigned: true`, `approvers`, `added` and `removed`.
