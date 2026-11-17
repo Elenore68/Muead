@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, type KeyboardEvent, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 interface ModalProps {
   title: string;
@@ -44,12 +45,15 @@ export default function Modal({ title, onClose, busy, children }: ModalProps) {
     }
   };
 
-  return (
+  // Rendered at the end of <body>: cards use backdrop-filter, which creates a stacking context, so a dialog rendered
+  // inside a card would sit under the cards that follow it (and could not be clicked).
+  return createPortal(
     <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && !busy && onClose()}>
       <div ref={ref} className="card modal" role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1} onKeyDown={onKeyDown}>
         <h2 id={titleId} className="card-title">{title}</h2>
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
