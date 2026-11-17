@@ -14,6 +14,10 @@ const statusClass: Record<string, string> = {
   Approved: "st-done",
   Scheduled: "st-progress",
   Cancelled: "st-rejected",
+  // Exact stages on Request Details (existing colours only).
+  "Pending Approval": "st-pending",
+  Readiness: "st-progress",
+  Validation: "st-progress",
 };
 const priorityClass: Record<string, string> = { High: "pr-high", Medium: "pr-medium", Low: "pr-low" };
 

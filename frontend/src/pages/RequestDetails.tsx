@@ -53,7 +53,9 @@ function RequestDetailsView({ id }: { id: string }) {
   const conflicts = useConflicts(id);
   const report = useReport(id, tab === "Report" && state.kind === "ready" && state.data.live?.status === "COMPLETED");
   const { profile } = useAuth();
-  const [flash, setFlash] = useState<Flash>(null);
+  // A page that sends people here (New Request) can pass a first message.
+  const first = (loc.state as { flash?: Flash } | null)?.flash;
+  const [flash, setFlash] = useState<Flash>(config.apiEnabled && first ? first : null);
 
   const refreshAll = useCallback(() => {
     void refresh();
