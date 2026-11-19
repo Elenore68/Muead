@@ -48,7 +48,7 @@ The first sign-in asks for a new password. People appear in the directory after 
 4. Open the Report tab; check the bell notifications on both accounts and the Schedule page.
 
 ## 5. Things that stay off until the owner decides
-Email (SES) and AI summaries (Bedrock) are disabled in `config.ts`. Alarms, a dead-letter queue and a custom domain are not built.
+Email (SES) is disabled in `config.ts`. AI summaries (Bedrock) are **enabled** in `config.ts` with `amazon.nova-lite-v1:0` (on-demand in us-east-1; the stack grants `bedrock:InvokeModel` on that model only). In the dev stack this was first switched on directly on the `muead-dev-summary` Lambda (environment variables plus an inline `BedrockNovaLite` role policy); the next `cdk deploy` makes the stack own this setting. Alarms, a dead-letter queue and a custom domain are not built.
 
 ## Cost and cleanup
 Cognito, DynamoDB (on demand), Lambda and API Gateway cost very little at test volume. The table, bucket, user pool and KMS key are

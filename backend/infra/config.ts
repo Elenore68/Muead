@@ -28,6 +28,7 @@ export const environments: Record<string, EnvConfig> = {
     // Local frontend dev server. Add the Amplify domain here once hosting exists.
     allowedOrigins: ["http://localhost:8002"],
     email: { enabled: false, fromAddress: "" },
-    ai: { enabled: false, modelId: "" },
+    // Enabled for the dev demo: Amazon Nova Lite (on-demand in us-east-1, called through the Bedrock Converse API).
+    ai: { enabled: true, modelId: "amazon.nova-lite-v1:0" },
   },
 };
